@@ -229,7 +229,7 @@ impl Plugin for UiPlugin {
         app.add_message::<Clicked>()
             .add_message::<Toast>()
             .init_resource::<PointerOverUi>()
-            .add_systems(Update, (button_feedback, button_disabled, pointer_over_ui, spawn_toasts, tick_toasts));
+            .add_systems(Update, (button_feedback, button_disabled, pointer_over_ui, spawn_toasts, tick_toasts, popwords, flash_fade));
     }
     // inserted here rather than in a startup system: the first screen's
     // OnEnter runs before startup commands are applied
@@ -242,5 +242,65 @@ impl Plugin for UiPlugin {
         });
         let mats = crate::models::make_mats(&mut app.world_mut().resource_mut::<Assets<StandardMaterial>>());
         app.insert_resource(mats);
+    }
+}
+
+/// Comic-book word that pops up at a screen point, floats up and fades.
+#[derive(Component)]
+pub struct PopWord {
+    t: f32,
+    at: Vec2,
+}
+
+pub fn pop_word(commands: &mut Commands, fonts: &Fonts, px: Vec2, word: &str, big: bool, color: Color) {
+    commands
+        .spawn((
+            Node { position_type: PositionType::Absolute, left: Val::Px(px.x - 80.0), top: Val::Px(px.y - 30.0), width: Val::Px(160.0), justify_content: JustifyContent::Center, ..default() },
+            PopWord { t: 0.0, at: px },
+            Pickable::IGNORE,
+            GlobalZIndex(30),
+            crate::Scoped,
+        ))
+        .with_children(|c| {
+            c.spawn((title_text(fonts, word, if big { 46.0 } else { 24.0 }, color), TextShadow { offset: Vec2::new(0.0, 4.0), color: Color::srgba(0.13, 0.12, 0.16, 0.9) }, TextLayout::default().with_no_wrap(), Pickable::IGNORE));
+        });
+}
+
+fn popwords(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut PopWord, &mut Node, &Children)>, mut tc: Query<(&mut TextColor, &mut UiTransform)>) {
+    for (e, mut p, mut n, ch) in q.iter_mut() {
+        p.t += time.delta_secs();
+        let k = p.t / 0.95;
+        if k >= 1.0 {
+            commands.entity(e).despawn();
+            continue;
+        }
+        n.top = Val::Px(p.at.y - 30.0 - 46.0 * k.powf(0.6));
+        for c in ch.iter() {
+            if let Ok((mut col, mut t)) = tc.get_mut(c) {
+                let pop = if k < 0.12 { 0.4 + k / 0.12 * 0.8 } else { 1.2 - (k - 0.12).min(0.2) };
+                t.scale = Vec2::splat(pop);
+                t.rotation = Rot2::radians(-0.08);
+                col.0 = col.0.with_alpha(if k > 0.7 { 1.0 - (k - 0.7) / 0.3 } else { 1.0 });
+            }
+        }
+    }
+}
+
+/// White full-screen flash that fades out (big impacts).
+#[derive(Component)]
+struct Flash(f32);
+
+pub fn flash(commands: &mut Commands) {
+    commands.spawn((Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.8)), Flash(0.3), Pickable::IGNORE, GlobalZIndex(40), crate::Scoped));
+}
+
+fn flash_fade(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut Flash, &mut BackgroundColor)>) {
+    for (e, mut f, mut bg) in q.iter_mut() {
+        f.0 -= time.delta_secs();
+        if f.0 <= 0.0 {
+            commands.entity(e).despawn();
+        } else {
+            bg.0 = Color::srgba(1.0, 1.0, 1.0, f.0 / 0.3 * 0.8);
+        }
     }
 }

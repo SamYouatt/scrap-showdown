@@ -10,7 +10,25 @@ rapier3d = "0.36"
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 bevy = { version = "0.20", features = ["webgl2", "wav", "debug"] }
 getrandom = { version = "0.3", features = ["wasm_js"] }
-web-sys = { version = "0.3", features = ["Window", "Location"] }
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Location",
+    "AudioContext",
+    "BaseAudioContext",
+    "AudioContextState",
+    "AudioNode",
+    "AudioParam",
+    "AudioDestinationNode",
+    "AudioScheduledSourceNode",
+    "AudioBuffer",
+    "AudioBufferSourceNode",
+    "OscillatorNode",
+    "OscillatorType",
+    "GainNode",
+    "BiquadFilterNode",
+    "BiquadFilterType",
+    "DynamicsCompressorNode",
+] }
 
 # fast-enough dev builds: our code at O1, deps fully optimised
 [profile.dev]

@@ -23,7 +23,7 @@ impl Plugin for BattlePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(Screen::Fight), enter)
             .add_systems(OnExit(Screen::Fight), exit)
-            .add_systems(Update, (update, hud, popwords, flash_fade).chain().run_if(in_state(Screen::Fight)));
+            .add_systems(Update, (update, hud).chain().run_if(in_state(Screen::Fight)));
     }
 }
 
@@ -98,13 +98,6 @@ struct TimerText;
 struct ImmobText;
 #[derive(Component)]
 struct BannerNode(f32);
-#[derive(Component)]
-struct PopWord {
-    t: f32,
-    at: Vec2,
-}
-#[derive(Component)]
-struct Flash(f32);
 
 const WORDS_BIG: [&str; 6] = ["CRUNCH!", "KA-BLAM!", "WHAM!", "CLANG!", "SMASH!", "KERRANG!"];
 const WORDS_SMALL: [&str; 4] = ["bonk", "tink", "clonk", "dink"];
@@ -825,22 +818,14 @@ fn hud(
     }
     if b.flash {
         b.flash = false;
-        commands.spawn((Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.8)), Flash(0.3), Pickable::IGNORE, GlobalZIndex(40), Scoped));
+        ui::flash(&mut commands);
     }
     // pop words: spawned at the projected point
     if let Ok((camera, gt)) = cam.single() {
         for (at, big, word, color) in std::mem::take(&mut b.pops) {
             let Ok(px) = camera.world_to_viewport(gt, at) else { continue };
             let w = word.unwrap_or_else(|| if big { crate::rng::pick(&WORDS_BIG).into() } else { crate::rng::pick(&WORDS_SMALL).into() });
-            commands.spawn((
-                Node { position_type: PositionType::Absolute, left: Val::Px(px.x - 80.0), top: Val::Px(px.y - 30.0), width: Val::Px(160.0), justify_content: JustifyContent::Center, ..default() },
-                PopWord { t: 0.0, at: px },
-                Pickable::IGNORE,
-                GlobalZIndex(30),
-                Scoped,
-            )).with_children(|c| {
-                c.spawn((ui::title_text(&fonts, w, if big { 46.0 } else { 24.0 }, color.unwrap_or(ui::YELLOW)), TextShadow { offset: Vec2::new(0.0, 4.0), color: Color::srgba(0.13, 0.12, 0.16, 0.9) }, TextLayout::default().with_no_wrap(), Pickable::IGNORE));
-            });
+            ui::pop_word(&mut commands, &fonts, px, &w, big, color.unwrap_or(ui::YELLOW));
         }
     }
     b.hud_t -= 1;
@@ -902,36 +887,5 @@ fn hud(
                 c.spawn((Node { width: Val::Px(18.0), height: Val::Px(9.0), border_radius: BorderRadius::all(Val::Px(3.0)), ..default() }, BackgroundColor(col), Pickable::IGNORE));
             }
         });
-    }
-}
-
-fn popwords(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut PopWord, &mut Node, &Children)>, mut tc: Query<(&mut TextColor, &mut UiTransform)>) {
-    for (e, mut p, mut n, ch) in q.iter_mut() {
-        p.t += time.delta_secs();
-        let k = p.t / 0.95;
-        if k >= 1.0 {
-            commands.entity(e).despawn();
-            continue;
-        }
-        n.top = Val::Px(p.at.y - 30.0 - 46.0 * k.powf(0.6));
-        for c in ch.iter() {
-            if let Ok((mut col, mut t)) = tc.get_mut(c) {
-                let pop = if k < 0.12 { 0.4 + k / 0.12 * 0.8 } else { 1.2 - (k - 0.12).min(0.2) };
-                t.scale = Vec2::splat(pop);
-                t.rotation = Rot2::radians(-0.08);
-                col.0 = col.0.with_alpha(if k > 0.7 { 1.0 - (k - 0.7) / 0.3 } else { 1.0 });
-            }
-        }
-    }
-}
-
-fn flash_fade(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut Flash, &mut BackgroundColor)>) {
-    for (e, mut f, mut bg) in q.iter_mut() {
-        f.0 -= time.delta_secs();
-        if f.0 <= 0.0 {
-            commands.entity(e).despawn();
-        } else {
-            bg.0 = Color::srgba(1.0, 1.0, 1.0, f.0 / 0.3 * 0.8);
-        }
     }
 }
