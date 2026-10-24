@@ -14,6 +14,7 @@ mod preview;
 mod results;
 mod rng;
 mod scene;
+mod scrap;
 mod state;
 mod title;
 mod ui;
@@ -84,7 +85,7 @@ fn main() {
     .insert_resource(ClearColor(Color::srgb_u8(0x8f, 0xc8, 0xef)))
     .insert_resource(state::GameState::new_game())
     .init_state::<Screen>()
-    .add_plugins((ui::UiPlugin, audio::AudioPlugin, scene::ScenePlugin, title::TitlePlugin, battle::BattlePlugin, results::ResultsPlugin, workshop::WorkshopPlugin))
+    .add_plugins((ui::UiPlugin, audio::AudioPlugin, scene::ScenePlugin, title::TitlePlugin, battle::BattlePlugin, results::ResultsPlugin, workshop::WorkshopPlugin, scrap::ScrapPlugin))
     .add_systems(Startup, start_screen);
     for s in [Screen::Title, Screen::Workshop, Screen::Fight, Screen::Results, Screen::Scrap] {
         app.add_systems(OnExit(s), clear_scoped);

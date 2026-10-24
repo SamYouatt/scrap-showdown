@@ -128,20 +128,23 @@ struct ToastWrap;
 
 fn spawn_toasts(mut commands: Commands, mut msgs: MessageReader<Toast>, fonts: Option<Res<Fonts>>, wrap: Query<Entity, With<ToastWrap>>) {
     let Some(fonts) = fonts else { return };
+    let mut wrap_e = wrap.single().ok();
     for Toast(msg, col) in msgs.read() {
-        let w = match wrap.single() {
-            Ok(w) => w,
-            Err(_) => commands
+        let w = match wrap_e {
+            Some(w) => w,
+            None => *wrap_e.insert(commands
                 .spawn((
                     ToastWrap,
                     Node { position_type: PositionType::Absolute, top: Val::Px(90.0), width: Val::Percent(100.0), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, row_gap: Val::Px(6.0), ..default() },
                     Pickable::IGNORE,
                     GlobalZIndex(50),
                 ))
-                .id(),
+                .id()),
         };
         commands.entity(w).with_children(|p| {
-            p.spawn((ToastNode(2.5), panel(Node { border: UiRect::all(Val::Px(3.0)), ..default() }), BorderColor::all(*col), Pickable::IGNORE))
+            // panel() already has a BorderColor: override it rather than bundle a duplicate
+            p.spawn((ToastNode(2.5), panel(Node { border: UiRect::all(Val::Px(3.0)), ..default() }), Pickable::IGNORE))
+                .insert(BorderColor::all(*col))
                 .with_children(|t| {
                     t.spawn((text(&fonts, msg.clone(), 17.0, CREAM), Pickable::IGNORE));
                 });
