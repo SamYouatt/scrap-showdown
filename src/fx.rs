@@ -1,11 +1,26 @@
 //! Particles (sparks, smoke, dust, bolts, paint shards) + camera shake.
 //! Each pool renders as ONE mesh rebuilt on the CPU every frame (instancing by
 //! hand), so the whole effect layer is five draw calls.
+//!
+//! A screen that wants effects inserts an [`Fx`] resource on enter and
+//! removes it on exit; while it exists [`plugin`] simulates and redraws it.
 use crate::models::{self, box_polys, cyl_polys, ico_polys, paint, Col, Geo};
 use crate::rng;
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::PrimitiveTopology;
 use bevy::prelude::*;
+
+pub(super) fn plugin(app: &mut App) {
+    app.add_systems(PostUpdate, update_fx.run_if(resource_exists::<Fx>));
+}
+
+/// Real time, so effects keep moving (slowly) through hit-stop; the owning
+/// screen sets `time_scale` for slow motion.
+fn update_fx(mut fx: ResMut<Fx>, time: Res<Time<Real>>, mut meshes: ResMut<Assets<Mesh>>) {
+    let dt = time.delta_secs().min(0.05) * fx.time_scale;
+    fx.update(dt);
+    fx.write(&mut meshes);
+}
 
 struct PConf {
     max: usize,
@@ -48,7 +63,7 @@ impl Pool {
         self.ps[i] = P { pos, vel, rot: Vec3::new(rng::rand() * 6.0, rng::rand() * 6.0, rng::rand() * 6.0), life, max: life, size, c1, c2: c2.unwrap_or(c1) };
     }
 
-    fn update(&mut self, dt: f32, floor: &dyn Fn(f32, f32) -> f32) {
+    fn update(&mut self, dt: f32, floor: fn(f32, f32) -> f32) {
         let c = &self.c;
         for p in self.ps.iter_mut() {
             if p.life <= 0.0 {
@@ -140,24 +155,29 @@ fn spark2() -> Col {
     Vec3::new(1.6, 0.35, 0.05)
 }
 
+#[derive(Resource)]
 pub struct Fx {
     sparks: Pool,
     smoke: Pool,
     dust: Pool,
     bits: Pool,
     shards: Pool,
-    pub shake: f32,
+    shake: f32,
+    /// multiplies real time when simulating
+    pub time_scale: f32,
+    /// floor height at (x, z) for particles that land
+    floor: fn(f32, f32) -> f32,
 }
 
 impl Fx {
     /// Create the pools and spawn their (empty) meshes with `scope`.
-    pub fn new(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>, scope: impl Bundle + Clone) -> Fx {
+    pub fn new(commands: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>, floor: fn(f32, f32) -> f32, scope: impl Bundle + Clone) -> Fx {
         let mut mk = |base: Geo, mat: StandardMaterial, c: PConf, shadows: bool| -> Pool {
             let mesh = meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
                 .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0f32, -100.0, 0.0]; 3])
                 .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0f32, 1.0, 0.0]; 3])
                 .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, vec![[0.0f32; 4]; 3]));
-            let mut e = commands.spawn((Mesh3d(mesh.clone()), MeshMaterial3d(mats.add(mat)), Transform::IDENTITY, bevy::camera::visibility::NoFrustumCulling, scope.clone()));
+            let mut e = commands.spawn((Name::new("Particles"), Mesh3d(mesh.clone()), MeshMaterial3d(mats.add(mat)), Transform::IDENTITY, bevy::camera::visibility::NoFrustumCulling, scope.clone()));
             if !shadows {
                 e.insert(bevy::light::NotShadowCaster);
             }
@@ -197,7 +217,7 @@ impl Fx {
             PConf { max: 500, gravity: 18.0, drag: 0.6, bounce: 0.25, stretch: false, grow: 0.0, spin: true, floored: true },
             true,
         );
-        Fx { sparks, smoke, dust, bits, shards, shake: 0.0 }
+        Fx { sparks, smoke, dust, bits, shards, shake: 0.0, time_scale: 1.0, floor }
     }
 
     /// Torn paint/plate flakes in the victim's colours, flung along `dir`.
@@ -262,14 +282,15 @@ impl Fx {
         }
     }
 
-    pub fn update(&mut self, dt: f32, floor: &dyn Fn(f32, f32) -> f32) {
+    fn update(&mut self, dt: f32) {
+        let floor = self.floor;
         for p in [&mut self.sparks, &mut self.smoke, &mut self.dust, &mut self.bits, &mut self.shards] {
             p.update(dt, floor);
         }
         self.shake = (self.shake - dt * 2.2).max(0.0);
     }
 
-    pub fn write(&self, meshes: &mut Assets<Mesh>) {
+    fn write(&self, meshes: &mut Assets<Mesh>) {
         for p in [&self.sparks, &self.smoke, &self.dust, &self.bits, &self.shards] {
             p.write(meshes);
         }

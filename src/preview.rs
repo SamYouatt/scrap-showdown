@@ -4,12 +4,6 @@ use crate::partmodels::build_part;
 use crate::parts::{ground_level, Design, Placed, LEG_LEN};
 use bevy::prelude::*;
 
-/// Marks one part's entity inside a preview so the workshop can pick it.
-#[derive(Component, Clone, Copy)]
-pub struct PreviewPart {
-    pub id: u32,
-}
-
 /// Root of a spawned preview; `ride` is how high the core sits off the floor.
 #[derive(Component, Clone, Copy)]
 pub struct PreviewRoot {
@@ -78,7 +72,7 @@ pub fn spawn_preview(
 ) -> Entity {
     let ride = -ground_level(d);
     let paint = models::col_of(d.paint);
-    let root = commands.spawn((transform, Visibility::default(), PreviewRoot { ride }, extra.clone())).id();
+    let root = commands.spawn((Name::new(d.name.clone()), transform, Visibility::default(), PreviewRoot { ride }, extra.clone())).id();
     for pl in &d.parts {
         let (mut g, m) = part_geo(pl, paint);
         let mut rot = pl.rot;
@@ -91,7 +85,6 @@ pub fn spawn_preview(
                 Mesh3d(meshes.add(g.to_mesh())),
                 MeshMaterial3d(shared.vc.clone()),
                 Transform { translation: pl.pos, rotation: rot, ..default() },
-                PreviewPart { id: pl.id },
                 extra.clone(),
             ))
             .with_children(|c| {

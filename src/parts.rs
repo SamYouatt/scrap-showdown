@@ -38,15 +38,6 @@ pub enum Res {
     Bolts,
 }
 
-/// Collider shapes in part-local space. Cylinders/cones are along local Z.
-#[derive(Clone, Debug)]
-pub enum Shape {
-    Box { h: Vec3, c: Vec3 },
-    Cyl { hh: f32, r: f32, c: Vec3 },
-    Cone { hh: f32, r: f32, c: Vec3 },
-    Hull { pts: Vec<Vec3> },
-}
-
 #[derive(Clone, Copy, Debug)]
 pub struct Bounds {
     pub h: Vec3,
@@ -54,7 +45,6 @@ pub struct Bounds {
 }
 
 pub struct PartDef {
-    pub kind: PartKind,
     pub name: &'static str,
     pub colour: Color,
     pub category: Category,
@@ -105,7 +95,6 @@ fn hex(s: &str) -> Color {
 macro_rules! def {
     ($kind:ident, $name:expr, $col:expr, $cat:ident, $st:expr, $hp:expr, $mass:expr, $pow:expr, $rar:expr, $rep:ident, $desc:expr, $b:expr) => {
         PartDef {
-            kind: PartKind::$kind,
             name: $name,
             colour: hex($col),
             category: Category::$cat,
@@ -226,12 +215,11 @@ impl Design {
         while grew {
             grew = false;
             for p in &self.parts {
-                if let Some(par) = p.parent {
-                    if out.contains(&par) && !out.contains(&p.id) {
+                if let Some(par) = p.parent
+                    && out.contains(&par) && !out.contains(&p.id) {
                         out.push(p.id);
                         grew = true;
                     }
-                }
             }
         }
         out
@@ -268,7 +256,6 @@ pub enum Face {
 }
 
 impl Face {
-    pub const ALL: [Face; 6] = [Face::PX, Face::NX, Face::PY, Face::NY, Face::PZ, Face::NZ];
     pub fn axis(self) -> usize {
         match self {
             Face::PX | Face::NX => 0,
@@ -368,7 +355,6 @@ pub struct Stats {
     pub armour: f32,
     pub bite: f32,
     pub balance: f32,
-    pub com: Vec3,
     /// lowest ground-contact point (bot-local y)
     pub lowest: f32,
     pub warnings: Vec<String>,
@@ -493,5 +479,5 @@ pub fn compute_stats(d: &Design) -> Stats {
     if bite == 0.0 {
         warnings.push("No weapons. Ramming only.".into());
     }
-    Stats { mass, supply, demand, power_ratio, drive, speed, armour, bite: bite_s, balance, com, lowest: ground_level(d), warnings }
+    Stats { mass, supply, demand, power_ratio, drive, speed, armour, bite: bite_s, balance, lowest: ground_level(d), warnings }
 }

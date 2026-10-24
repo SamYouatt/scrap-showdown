@@ -30,6 +30,12 @@ web-sys = { version = "0.3", features = [
     "DynamicsCompressorNode",
 ] }
 
+[lints.clippy]
+# Bevy injects system arguments and queries, so these lints fire on idiomatic systems.
+too_many_arguments = "allow"
+type_complexity = "allow"
+nonstandard_macro_braces = "warn"
+
 # fast-enough dev builds: our code at O1, deps fully optimised
 [profile.dev]
 opt-level = 1

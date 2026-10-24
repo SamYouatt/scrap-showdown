@@ -1,7 +1,7 @@
 //! Physics robot: one rigid body made of per-part colliders placed anywhere on
 //! the frame, raycast suspension for wheels, IK walking for legs, weapons that
 //! act along their own mounted axes, and parts that break off into debris.
-use crate::audio::{self, Hum, HumKind};
+use crate::audio::{Hum, HumKind, Sfx, Snd};
 use crate::fx::Fx;
 use crate::models::{self, Col, Mats};
 use crate::partmodels::{build_part, collision_shapes, hammer_arm_hulls, ColShape};
@@ -44,9 +44,39 @@ pub enum Ev {
 pub struct Ctx<'a> {
     pub phys: &'a mut Phys,
     pub fx: &'a mut Fx,
+    pub sfx: &'a mut Vec<Sfx>,
     pub part_of: &'a PartOf,
     pub ev: &'a mut Vec<Ev>,
     pub time: f32,
+}
+
+/// Eye looks: calm, angry after a hit, dead.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Eyes {
+    Calm,
+    Angry,
+    Dead,
+}
+
+/// Glowing eye materials shared by every robot.
+#[derive(Resource)]
+pub struct EyeMats([Handle<StandardMaterial>; 3]);
+
+impl EyeMats {
+    pub fn get(&self, e: Eyes) -> Handle<StandardMaterial> {
+        self.0[e as usize].clone()
+    }
+}
+
+impl FromWorld for EyeMats {
+    fn from_world(world: &mut World) -> Self {
+        let mut mats = world.resource_mut::<Assets<StandardMaterial>>();
+        EyeMats([
+            models::glow_mat(&mut mats, models::hexc("#ffd25a"), 2.4),
+            models::glow_mat(&mut mats, models::hexc("#ff6a3c"), 2.4),
+            models::glow_mat(&mut mats, models::hexc("#3a3335"), 1.0),
+        ])
+    }
 }
 
 pub struct LegEnts {
@@ -146,7 +176,6 @@ pub struct Robot {
     pub root: Entity,
     pub parts: Vec<RPart>,
     pub core: usize,
-    pub design: Design,
     pub paint: Col,
     pub input: Input,
     pub power_ratio: f32,
@@ -185,9 +214,9 @@ pub struct Robot {
 pub struct Spawn<'a, 'w, 's> {
     pub commands: &'a mut Commands<'w, 's>,
     pub meshes: &'a mut Assets<Mesh>,
-    pub mats: &'a mut Assets<StandardMaterial>,
     pub shared: &'a Mats,
-    pub glow: [Handle<StandardMaterial>; 4],
+    pub glow: &'a EyeMats,
+    pub sfx: &'a mut Vec<Sfx>,
 }
 
 impl Robot {
@@ -202,7 +231,7 @@ impl Robot {
                 .angular_damping(0.6)
                 .ccd_enabled(true),
         );
-        let root = sp.commands.spawn((Transform::from_rotation(rot), Visibility::default(), scope.clone())).id();
+        let root = sp.commands.spawn((Name::new(design.name.clone()), Transform::from_rotation(rot), Visibility::default(), scope.clone())).id();
         let paint = models::col_of(design.paint);
         let mut r = Robot {
             team,
@@ -210,7 +239,6 @@ impl Robot {
             root,
             parts: vec![],
             core: 0,
-            design: design.clone(),
             paint,
             input: Input::default(),
             power_ratio: stats.power_ratio,
@@ -232,7 +260,7 @@ impl Robot {
             side_time: 0.0,
             damage_dealt: 0.0,
             damage_taken: 0.0,
-            motor: Hum::new(HumKind::Motor),
+            motor: Hum { owner: root, kind: HumKind::Motor },
             spin_hum: None,
             blink: 0.0,
             mood: 0.0,
@@ -250,10 +278,8 @@ impl Robot {
         }
         r.core = r.parts.iter().position(|p| p.kind == PartKind::Core).unwrap_or(0);
         // weapons you trigger: the first one built is weapon 1, the rest weapon 2
-        let mut i = 0;
-        for p in r.parts.iter_mut().filter(|p| matches!(p.kind, PartKind::Hammer | PartKind::Flipper)) {
+        for (i, p) in r.parts.iter_mut().filter(|p| matches!(p.kind, PartKind::Hammer | PartKind::Flipper)).enumerate() {
             p.slot = i.min(1);
-            i += 1;
         }
         let b = &phys.w.bodies[body];
         r.mass = b.mass();
@@ -283,7 +309,11 @@ impl Robot {
             }
         }
         if r.parts.iter().any(|p| p.kind == PartKind::Spinner) {
-            r.spin_hum = Some(Hum::new(HumKind::Spinner));
+            r.spin_hum = Some(Hum { owner: root, kind: HumKind::Spinner });
+        }
+        sp.sfx.push(r.motor.start());
+        if let Some(h) = r.spin_hum {
+            sp.sfx.push(h.start());
         }
         let wheel_f: f32 = r.parts.iter().map(|p| match p.kind {
             PartKind::Leg => 230.0,
@@ -333,7 +363,7 @@ impl Robot {
         }
         let mut eyes = vec![];
         for (g, t, _) in &model.glow {
-            let e = sp.commands.spawn((Mesh3d(sp.meshes.add(g.to_mesh())), MeshMaterial3d(sp.glow[0].clone()), *t, bevy::light::NotShadowCaster, scope.clone())).id();
+            let e = sp.commands.spawn((Mesh3d(sp.meshes.add(g.to_mesh())), MeshMaterial3d(sp.glow.get(Eyes::Calm)), *t, bevy::light::NotShadowCaster, scope.clone())).id();
             sp.commands.entity(ent).add_child(e);
             eyes.push((e, *t));
         }
@@ -530,14 +560,13 @@ impl Robot {
 
     /// Push the body that owns `h` (if dynamic and not us).
     fn push_other(&self, ctx: &mut Ctx, h: ColliderHandle, f: Vec3, at: Vec3) {
-        if let Some(bh) = ctx.phys.collider(h).and_then(|c| c.parent()) {
-            if bh != self.body {
+        if let Some(bh) = ctx.phys.collider(h).and_then(|c| c.parent())
+            && bh != self.body {
                 let b = &mut ctx.phys.w.bodies[bh];
                 if b.is_dynamic() {
                     b.add_force_at_point(f, at, true);
                 }
             }
-        }
     }
 
     // ------------------------------------------------------------------ physics
@@ -567,7 +596,7 @@ impl Robot {
         if self.input.boost && self.boost_cd <= 0.0 && !self.halted && self.grounded_frac > 0.0 {
             self.boost_t = Boost::TIME;
             self.boost_cd = Boost::COOLDOWN;
-            audio::pneumatic();
+            ctx.sfx.push(Snd::Pneumatic.play());
             ctx.fx.dust_puff(self.bot_world(Vec3::new(0.0, -0.2, -0.6)), 6, None, 0.12, 2.5);
         }
         let boosting = self.boost_t > 0.0;
@@ -733,7 +762,7 @@ impl Robot {
                 // like a car: turn rate grows with speed and flips in reverse; a slow
                 // shuffle-pivot at a standstill so you can never get properly stuck
                 rate = (3.2 * (1.0 - v_fwd.abs() / 2.0).max(0.0)).max((1.2 + 0.55 * v_fwd.abs()).min(3.4));
-                dir = if v_fwd > 0.3 { 1.0 } else if v_fwd < -0.3 { -1.0 } else if self.input.throttle < -0.1 { -1.0 } else { 1.0 };
+                dir = if v_fwd > 0.3 { 1.0 } else if v_fwd < -0.3 || self.input.throttle < -0.1 { -1.0 } else { 1.0 };
             }
             if car && self.input.brake && v_fwd.abs() > 0.6 {
                 rate *= 1.9;
@@ -753,7 +782,7 @@ impl Robot {
                 b.apply_impulse(Vec3::new(0.0, m * 2.6, 0.0), true);
                 b.apply_torque_impulse(Vec3::new(axis.x * m * 0.9, 0.0, axis.z * m * 0.9), true);
                 ctx.fx.dust(self.pos.with_y(0.05), 8);
-                audio::thud(0.3);
+                ctx.sfx.push(Snd::Thud.at(0.3));
             }
         } else {
             self.side_time = 0.0;
@@ -773,7 +802,7 @@ impl Robot {
             b.apply_impulse(Vec3::new(0.0, m * 2.2, 0.0), true);
             b.apply_torque_impulse(Vec3::new(roll.x * m * 1.1 * s, 0.0, roll.z * m * 1.1 * s), true);
             ctx.fx.dust(self.pos.with_y(0.05), 8);
-            audio::thud(0.3);
+            ctx.sfx.push(Snd::Thud.at(0.3));
         }
         self.step_weapons(ctx, dt, inverted);
     }
@@ -852,7 +881,7 @@ impl Robot {
                     let ff = self.parts[i].foot.unwrap();
                     ctx.fx.dust_puff(ff + Vec3::Y * 0.02, 2, None, 0.07, 0.6);
                     if self.team == 0 {
-                        audio::scrape();
+                        ctx.sfx.push(Snd::Scrape.play());
                     }
                 }
             } else {
@@ -1052,7 +1081,7 @@ impl Robot {
             ctx.phys.body_mut(self.body).apply_impulse_at_point(back, centre, true);
             ctx.fx.spark_burst(hit_pt, (30.0 + 50.0 * e) as usize, Some(dir), 10.0, 1.0);
             ctx.fx.bolt_burst(hit_pt, (3.0 + 8.0 * e) as usize, Some(dir));
-            audio::spinner_hit(0.4 + e * 0.6);
+            ctx.sfx.push(Snd::SpinnerHit.at(0.4 + e * 0.6));
             ctx.ev.push(Ev::HitStop(0.05 + 0.09 * e));
             ctx.fx.add_shake(0.35 + e * 0.5);
             ctx.ev.push(Ev::Hit { att: Some(self.team), tgt: op, dmg: 40.0 * e, pt: hit_pt, big: e > 0.45, word: None });
@@ -1061,7 +1090,7 @@ impl Robot {
             let j = 90.0 * e;
             ctx.phys.body_mut(self.body).apply_impulse_at_point(Vec3::new(-radial.x * j, 10.0 * e, -radial.z * j), centre, true);
             ctx.fx.spark_burst(hit_pt, (15.0 + 20.0 * e) as usize, Some(-radial), 7.0, 1.0);
-            audio::grind(0.5 + e * 0.5);
+            ctx.sfx.push(Snd::Grind.at(0.5 + e * 0.5));
             ctx.fx.add_shake(0.15);
         }
         self.parts[i].spin *= 0.35;
@@ -1079,7 +1108,7 @@ impl Robot {
                 p.anim = 0.0;
                 p.struck = false;
                 p.stop_at = None;
-                audio::whoosh();
+                ctx.sfx.push(Snd::Whoosh.play());
                 // upside down with the head on the floor: the arm levers us over
                 let head = self.part_world(&self.parts[i], hammer_head(rest));
                 if inverted && self.solid_at(ctx, head, 0.25) {
@@ -1148,8 +1177,7 @@ impl Robot {
                 ctx.phys.body_mut(self.body).apply_impulse_at_point(-dn * 0.35, head, true);
                 ctx.fx.spark_burst(head, 45, Some(-swing), 8.0, 1.4);
                 ctx.fx.bolt_burst(head, 6, None);
-                audio::clang(1.0);
-                audio::thud(0.9);
+                ctx.sfx.extend([Snd::Clang.play(), Snd::Thud.at(0.9)]);
                 ctx.ev.push(Ev::HitStop(0.09));
                 ctx.fx.add_shake(0.6);
                 ctx.ev.push(Ev::Hit { att: Some(self.team), tgt: op, dmg: 32.0 * self.power_ratio, pt: head, big: true, word: None });
@@ -1174,7 +1202,7 @@ impl Robot {
     fn slam(&mut self, ctx: &mut Ctx, head: Vec3, inverted: bool) {
         ctx.fx.dust(head.with_y(0.05), 10);
         ctx.fx.spark_burst(head, 10, Some(Vec3::Y), 5.0, 1.0);
-        audio::thud(0.5);
+        ctx.sfx.push(Snd::Thud.at(0.5));
         ctx.fx.add_shake(0.2);
         // the floor always pushes back up, so an upside-down slam can self-right
         let b = ctx.phys.body_mut(self.body);
@@ -1216,22 +1244,19 @@ impl Robot {
         }
         self.parts[i].anim = 0.0;
         self.parts[i].cooldown = 1.9;
-        audio::pneumatic();
+        ctx.sfx.push(Snd::Pneumatic.play());
         // everything sitting on / just above the plate
         let p = &self.parts[i];
         let centre = self.part_world(p, Vec3::new(0.0, FLIP.hinge_y + FLIP.len * 0.55, 0.3));
         let wq = self.q * p.quat;
         let mut victims: Vec<((usize, usize), Vec3, RigidBodyHandle)> = vec![];
         for h in ctx.phys.overlaps(Pose::from_parts(centre, wq), &rapier3d::prelude::Cuboid::new(Vec3::new(0.32, FLIP.len * 0.55, 0.4))) {
-            if let Some(&op) = ctx.part_of.get(&h) {
-                if op.0 != self.team && !victims.iter().any(|v| v.0 .0 == op.0) {
-                    if let Some(c) = ctx.phys.collider(h) {
-                        if let Some(bh) = c.parent() {
+            if let Some(&op) = ctx.part_of.get(&h)
+                && op.0 != self.team && !victims.iter().any(|v| v.0 .0 == op.0)
+                    && let Some(c) = ctx.phys.collider(h)
+                        && let Some(bh) = c.parent() {
                             victims.push((op, c.translation(), bh));
                         }
-                    }
-                }
-            }
         }
         let launch = self.dir_world(p, Vec3::Z);
         let along = self.dir_world(p, Vec3::Y);
@@ -1347,7 +1372,7 @@ impl Robot {
         }
         dc.debris.push(Debris { body: db, ent: p.ent, born: dc.time, smoke_t: 0.0 });
         if !quiet {
-            audio::snap();
+            dc.sfx.push(Snd::Snap.play());
             dc.fx.spark_burst(wp, 45, Some(kick), 7.0, 1.3);
             dc.fx.bolt_burst(wp, 12, Some(kick));
             dc.fx.shard_burst(wp, 22, self.paint, Some(kick), 6.0);
@@ -1371,7 +1396,7 @@ impl Robot {
             return;
         }
         self.alive = false;
-        audio::explode();
+        dc.sfx.push(Snd::Explode.play());
         dc.fx.add_shake(1.0);
         dc.hit_stop = dc.hit_stop.max(0.2);
         dc.fx.spark_burst(self.pos, 120, Some(Vec3::Y), 12.0, 1.5);
@@ -1391,16 +1416,20 @@ impl Robot {
         let b = dc.phys.body_mut(self.body);
         b.apply_impulse(Vec3::new(0.0, self.mass * 6.0, 0.0), true);
         b.apply_torque_impulse(Vec3::new(rng::signed() * 15.0, 10.0, rng::signed() * 15.0), true);
-        self.motor.stop();
-        if let Some(h) = &self.spin_hum {
-            h.stop();
+        self.stop_hums(dc.sfx);
+    }
+
+    pub fn stop_hums(&self, sfx: &mut Vec<Sfx>) {
+        sfx.push(self.motor.stop());
+        if let Some(h) = self.spin_hum {
+            sfx.push(h.stop());
         }
     }
 
     // ------------------------------------------------------------------ visuals
     /// Compute every visual transform for this frame. `out` gets (entity,
     /// transform); `mats` gets eye material swaps.
-    pub fn sync_visual(&mut self, phys: &Phys, fx: &mut Fx, dt: f32, time: f32, out: &mut Vec<(Entity, Transform)>, mats: &mut Vec<(Entity, usize)>) {
+    pub fn sync_visual(&mut self, phys: &Phys, fx: &mut Fx, sfx: &mut Vec<Sfx>, dt: f32, out: &mut Vec<(Entity, Transform)>, mats: &mut Vec<(Entity, Eyes)>) {
         let b = phys.body(self.body);
         out.push((self.root, Transform { translation: b.translation(), rotation: *b.rotation(), ..default() }));
         self.read_pose(phys);
@@ -1473,18 +1502,17 @@ impl Robot {
                 let sy = if closed { 0.15 } else if self.mood > 0.0 { 0.55 } else { 1.0 };
                 let rz = if self.mood > 0.0 { if k > 0 { -0.5 } else { 0.5 } } else { 0.0 };
                 out.push((*e, Transform { translation: t.translation, rotation: Quat::from_rotation_z(rz), scale: Vec3::new(1.0, sy, 1.0) }));
-                mats.push((*e, if self.mood > 0.0 { 1 } else { 0 }));
+                mats.push((*e, if self.mood > 0.0 { Eyes::Angry } else { Eyes::Calm }));
             }
-            self.motor.set((self.input.throttle.abs() + self.input.turn.abs() * 0.5).min(1.0), if self.team == 0 { 1.0 } else { 0.6 });
-            if let Some(h) = &self.spin_hum {
-                h.set(spin_level, 1.0);
+            sfx.push(self.motor.set((self.input.throttle.abs() + self.input.turn.abs() * 0.5).min(1.0), if self.team == 0 { 1.0 } else { 0.6 }));
+            if let Some(h) = self.spin_hum {
+                sfx.push(h.set(spin_level, 1.0));
             }
         } else {
             for (e, _) in &self.parts[core].eyes {
-                mats.push((*e, 2));
+                mats.push((*e, Eyes::Dead));
             }
         }
-        let _ = time;
     }
 
     /// Two-bone IK from the hip to the foot.
@@ -1530,22 +1558,18 @@ impl Robot {
         c.hp / c.max_hp
     }
 
-    pub fn dispose(&self, phys: &mut Phys, part_of: &mut PartOf, commands: &mut Commands) {
-        self.motor.stop();
-        if let Some(h) = &self.spin_hum {
-            h.stop();
-        }
+    pub fn dispose(&self, phys: &mut Phys, part_of: &mut PartOf, commands: &mut Commands, sfx: &mut Vec<Sfx>) {
+        self.stop_hums(sfx);
         for p in &self.parts {
             for c in &p.colliders {
                 part_of.remove(c);
             }
-            if p.attached {
-                if let Some(l) = &p.legs {
+            if p.attached
+                && let Some(l) = &p.legs {
                     for e in [l.upper, l.lower, l.foot] {
                         commands.entity(e).try_despawn();
                     }
                 }
-            }
         }
         phys.w.remove_body_with_colliders(self.body, true);
         commands.entity(self.root).try_despawn();
@@ -1564,6 +1588,7 @@ pub struct DetachCtx<'a, 'w, 's> {
     pub phys: &'a mut Phys,
     pub part_of: &'a mut PartOf,
     pub fx: &'a mut Fx,
+    pub sfx: &'a mut Vec<Sfx>,
     pub commands: &'a mut Commands<'w, 's>,
     pub shared: &'a Mats,
     pub debris: &'a mut Vec<Debris>,

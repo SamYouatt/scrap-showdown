@@ -1,14 +1,20 @@
-//! Sound effects API. Gameplay code calls these free functions from anywhere
-//! (like the TS prototype's `sfx.*`); they queue commands that `AudioPlugin`
-//! turns into sounds. All sounds are synthesised live with WebAudio (no asset
+//! Sound effects. Gameplay writes [`Sfx`] messages; [`plugin`] turns them
+//! into sounds. All sounds are synthesised live with WebAudio (no asset
 //! files), ported from the TS prototype's `audio.ts`.
 //!
 //! Playback only exists on wasm32. The AudioContext is created on the first
-//! keyboard or mouse press (browser autoplay rules); commands queued before
+//! keyboard or mouse press (browser autoplay rules); sounds requested before
 //! that are dropped, except the crowd on/off state. On native targets the
-//! queue is drained and ignored.
+//! messages are read and ignored.
 use bevy::prelude::*;
-use std::sync::Mutex;
+
+pub(super) fn plugin(app: &mut App) {
+    app.add_message::<Sfx>();
+    #[cfg(target_arch = "wasm32")]
+    app.init_non_send::<web::WebAudio>();
+    // after Update and FixedUpdate have written this frame's sounds
+    app.add_systems(PostUpdate, play_sounds);
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Snd {
@@ -33,112 +39,78 @@ pub enum Snd {
     Cheer,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+impl Snd {
+    /// One-shot at full intensity.
+    pub fn play(self) -> Sfx {
+        self.at(1.0)
+    }
+    /// One-shot at an intensity of 0..~1.5.
+    pub fn at(self, intensity: f32) -> Sfx {
+        Sfx::Play { snd: self, intensity, pitch: 1.0 }
+    }
+    /// One-shot with a pitch multiplier.
+    pub fn pitched(self, pitch: f32) -> Sfx {
+        Sfx::Play { snd: self, intensity: 1.0, pitch }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum HumKind {
     Motor,
     Spinner,
 }
 
-#[derive(Clone, Debug)]
-pub enum Cmd {
-    /// one-shot: intensity 0..~1.5, pitch multiplier
-    Play { snd: Snd, intensity: f32, pitch: f32 },
-    HumStart { id: u32, kind: HumKind },
-    /// level 0..1 (revs), vol 0..1
-    HumSet { id: u32, level: f32, vol: f32 },
-    HumStop { id: u32 },
-    Crowd(bool),
-    Music(bool),
-}
-
-static QUEUE: Mutex<Vec<Cmd>> = Mutex::new(Vec::new());
-static NEXT_HUM: Mutex<u32> = Mutex::new(1);
-
-fn push(c: Cmd) {
-    if let Ok(mut q) = QUEUE.lock() {
-        if q.len() < 256 {
-            q.push(c);
-        }
-    }
-}
-/// Drain queued commands (used by the playback system).
-pub fn drain() -> Vec<Cmd> {
-    QUEUE.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default()
-}
-
-fn play(snd: Snd, intensity: f32, pitch: f32) {
-    push(Cmd::Play { snd, intensity, pitch });
-}
-
-pub fn thud(i: f32) { play(Snd::Thud, i, 1.0) }
-pub fn clang(i: f32) { play(Snd::Clang, i, 1.0) }
-pub fn grind(i: f32) { play(Snd::Grind, i, 1.0) }
-pub fn spinner_hit(i: f32) { play(Snd::SpinnerHit, i, 1.0) }
-pub fn whoosh() { play(Snd::Whoosh, 1.0, 1.0) }
-pub fn pneumatic() { play(Snd::Pneumatic, 1.0, 1.0) }
-pub fn snap() { play(Snd::Snap, 1.0, 1.0) }
-pub fn pop() { play(Snd::Pop, 1.0, 1.0) }
-pub fn ding(pitch: f32) { play(Snd::Ding, 1.0, pitch) }
-pub fn rare_ding() { play(Snd::RareDing, 1.0, 1.0) }
-pub fn buzzer() { play(Snd::Buzzer, 1.0, 1.0) }
-pub fn bell() { play(Snd::Bell, 1.0, 1.0) }
-pub fn bark() { play(Snd::Bark, 1.0, 1.0) }
-pub fn alarm() { play(Snd::Alarm, 1.0, 1.0) }
-pub fn scrape() { play(Snd::Scrape, 1.0, 1.0) }
-pub fn explode() { play(Snd::Explode, 1.0, 1.0) }
-pub fn click() { play(Snd::Click, 1.0, 1.0) }
-pub fn place() { play(Snd::Place, 1.0, 1.0) }
-pub fn cheer(i: f32) { play(Snd::Cheer, i, 1.0) }
-pub fn crowd(on: bool) { push(Cmd::Crowd(on)) }
-pub fn music(on: bool) { push(Cmd::Music(on)) }
-
-/// A continuous engine/spinner hum whose pitch follows `level`.
+/// A continuous engine/spinner hum, keyed by the entity that owns it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Hum {
-    id: u32,
+    pub owner: Entity,
+    pub kind: HumKind,
 }
+
 impl Hum {
-    pub fn new(kind: HumKind) -> Self {
-        let id = NEXT_HUM.lock().map(|mut n| {
-            *n += 1;
-            *n
-        }).unwrap_or(0);
-        push(Cmd::HumStart { id, kind });
-        Hum { id }
+    pub fn start(self) -> Sfx {
+        Sfx::HumStart(self)
     }
-    pub fn set(&self, level: f32, vol: f32) {
-        push(Cmd::HumSet { id: self.id, level, vol });
+    /// `level` 0..1 (revs), `vol` 0..1.
+    pub fn set(self, level: f32, vol: f32) -> Sfx {
+        Sfx::HumSet { hum: self, level, vol }
     }
-    pub fn stop(&self) {
-        push(Cmd::HumStop { id: self.id });
+    pub fn stop(self) -> Sfx {
+        Sfx::HumStop(self)
     }
 }
 
-pub struct AudioPlugin;
-impl Plugin for AudioPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(Update, audio_system);
-    }
+/// A request to make (or change) a sound.
+#[derive(Message, Clone, Copy, Debug)]
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub enum Sfx {
+    Play { snd: Snd, intensity: f32, pitch: f32 },
+    HumStart(Hum),
+    HumSet { hum: Hum, level: f32, vol: f32 },
+    HumStop(Hum),
+    Crowd(bool),
 }
 
-fn audio_system(
-    keys: Option<Res<ButtonInput<KeyCode>>>,
-    mouse: Option<Res<ButtonInput<MouseButton>>>,
+#[cfg(target_arch = "wasm32")]
+fn play_sounds(
+    mut sfx: MessageReader<Sfx>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    mut web: NonSendMut<web::WebAudio>,
 ) {
-    let gesture = keys.is_some_and(|k| k.get_just_pressed().len() > 0)
-        || mouse.is_some_and(|m| m.get_just_pressed().len() > 0);
-    let cmds = drain();
-    #[cfg(target_arch = "wasm32")]
-    web::update(gesture, cmds);
-    #[cfg(not(target_arch = "wasm32"))]
-    let _ = (gesture, cmds);
+    let gesture = keys.get_just_pressed().len() > 0 || mouse.get_just_pressed().len() > 0;
+    web.update(gesture, sfx.read().copied());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn play_sounds(mut sfx: MessageReader<Sfx>) {
+    sfx.clear();
 }
 
 #[cfg(target_arch = "wasm32")]
 mod web {
-    //! WebAudio synth. The nodes are !Send, so everything lives in a
-    //! thread_local (wasm32 runs Bevy on the single main thread).
-    use super::{Cmd, HumKind, Snd};
-    use std::cell::RefCell;
+    //! WebAudio synth. The nodes are !Send, so it lives in a non-send resource.
+    use super::{Hum, HumKind, Sfx, Snd};
     use std::collections::HashMap;
     use web_sys::{
         AudioBuffer, AudioBufferSourceNode, AudioContext, AudioScheduledSourceNode, AudioContextState, BiquadFilterNode,
@@ -146,40 +118,36 @@ mod web {
     };
 
     #[derive(Default)]
-    struct State {
+    pub struct WebAudio {
         synth: Option<Synth>,
         /// Last requested crowd state, applied when the context is created.
         crowd_wanted: bool,
     }
 
-    thread_local! {
-        static STATE: RefCell<State> = RefCell::new(State::default());
-    }
-
-    pub fn update(gesture: bool, cmds: Vec<Cmd>) {
-        STATE.with_borrow_mut(|st| {
+    impl WebAudio {
+        pub fn update(&mut self, gesture: bool, sfx: impl Iterator<Item = Sfx>) {
             if gesture {
-                match &st.synth {
+                match &self.synth {
                     Some(s) => s.resume(),
                     None => {
-                        st.synth = Synth::new();
-                        if st.crowd_wanted {
-                            if let Some(s) = &mut st.synth {
+                        self.synth = Synth::new();
+                        if self.crowd_wanted {
+                            if let Some(s) = &mut self.synth {
                                 s.crowd(true);
                             }
                         }
                     }
                 }
             }
-            for c in cmds {
-                if let Cmd::Crowd(on) = c {
-                    st.crowd_wanted = on;
+            for c in sfx {
+                if let Sfx::Crowd(on) = c {
+                    self.crowd_wanted = on;
                 }
-                if let Some(s) = &mut st.synth {
+                if let Some(s) = &mut self.synth {
                     s.handle(c);
                 }
             }
-        });
+        }
     }
 
     struct Crowd {
@@ -201,7 +169,7 @@ mod web {
         master: GainNode,
         noise_buf: AudioBuffer,
         crowd: Option<Crowd>,
-        hums: HashMap<u32, HumNodes>,
+        hums: HashMap<Hum, HumNodes>,
         rng: u64,
     }
 
@@ -248,29 +216,27 @@ mod web {
             rand_f32(&mut self.rng)
         }
 
-        fn handle(&mut self, c: Cmd) {
+        fn handle(&mut self, c: Sfx) {
             match c {
-                Cmd::Play { snd, intensity, pitch } => self.play(snd, intensity.max(0.0), pitch),
-                Cmd::HumStart { id, kind } => {
-                    if let Some(h) = self.hum_new(kind) {
+                Sfx::Play { snd, intensity, pitch } => self.play(snd, intensity.max(0.0), pitch),
+                Sfx::HumStart(id) => {
+                    if let Some(h) = self.hum_new(id.kind) {
                         if let Some(old) = self.hums.insert(id, h) {
                             self.hum_stop(old);
                         }
                     }
                 }
-                Cmd::HumSet { id, level, vol } => {
-                    if let Some(h) = self.hums.get(&id) {
+                Sfx::HumSet { hum, level, vol } => {
+                    if let Some(h) = self.hums.get(&hum) {
                         self.hum_set(h, level, vol);
                     }
                 }
-                Cmd::HumStop { id } => {
+                Sfx::HumStop(id) => {
                     if let Some(h) = self.hums.remove(&id) {
                         self.hum_stop(h);
                     }
                 }
-                Cmd::Crowd(on) => self.crowd(on),
-                // The TS prototype only stores a flag; there is no music synth.
-                Cmd::Music(_) => {}
+                Sfx::Crowd(on) => self.crowd(on),
             }
         }
 

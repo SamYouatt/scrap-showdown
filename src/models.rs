@@ -45,10 +45,11 @@ impl Pal {
     pub fn cream() -> Col { hexc("#efe2c4") }
     pub fn teal() -> Col { hexc("#3fa7a3") }
     pub fn wood() -> Col { hexc("#a8763e") }
-    pub fn dirt() -> Col { hexc("#c99a5e") }
 }
 
 // ------------------------------------------------------------------ seeded rand
+// Model building reseeds this before generating a scene, so the same seed
+// gives the same props. It's per-thread: reseed and build in one system.
 thread_local! {
     static SEED: Cell<u64> = const { Cell::new(1337) };
 }
@@ -271,9 +272,6 @@ impl Geo {
     pub fn new() -> Self {
         Self::default()
     }
-    pub fn is_empty(&self) -> bool {
-        self.pos.is_empty()
-    }
     fn tri(&mut self, a: Vec3, b: Vec3, c: Vec3, col: Col) {
         let n = (b - a).cross(c - a).normalize_or_zero();
         self.pos.extend([a, b, c]);
@@ -309,16 +307,6 @@ impl Geo {
             .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, self.nrm.iter().map(|v| v.to_array()).collect::<Vec<_>>())
             .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, self.col.iter().map(|c| [c.x, c.y, c.z, 1.0]).collect::<Vec<_>>())
             .with_inserted_indices(Indices::U32((0..n).collect()))
-    }
-    /// Axis-aligned bounds.
-    pub fn aabb(&self) -> (Vec3, Vec3) {
-        let mut lo = Vec3::splat(f32::INFINITY);
-        let mut hi = Vec3::splat(f32::NEG_INFINITY);
-        for p in &self.pos {
-            lo = lo.min(*p);
-            hi = hi.max(*p);
-        }
-        (lo, hi)
     }
     pub fn tint(&mut self, f: Col) {
         for c in self.col.iter_mut() {
@@ -440,34 +428,27 @@ pub fn rz(a: f32) -> Quat {
 pub const HALF_PI: f32 = PI / 2.0;
 
 // ------------------------------------------------------------------ materials
+pub(super) fn plugin(app: &mut App) {
+    app.init_resource::<Mats>();
+}
+
 /// Shared materials. `vc` is the vertex-coloured junk material used by
 /// almost everything; glow materials bloom.
 #[derive(Resource, Clone)]
 pub struct Mats {
     pub vc: Handle<StandardMaterial>,
-    pub vc_nocull: Handle<StandardMaterial>,
     /// battered, scorched paint (multiplies the vertex colours)
     pub scorch: Handle<StandardMaterial>,
 }
 
-pub fn make_mats(mats: &mut Assets<StandardMaterial>) -> Mats {
-    let vc = mats.add(StandardMaterial {
-        base_color: Color::WHITE,
-        perceptual_roughness: 0.82,
-        metallic: 0.08,
-        reflectance: 0.35,
-        ..default()
-    });
-    let vc_nocull = mats.add(StandardMaterial {
-        base_color: Color::WHITE,
-        perceptual_roughness: 0.85,
-        metallic: 0.05,
-        cull_mode: None,
-        double_sided: true,
-        ..default()
-    });
-    let scorch = mats.add(StandardMaterial { base_color: Color::srgb_u8(0x8a, 0x80, 0x7a), perceptual_roughness: 0.95, metallic: 0.05, ..default() });
-    Mats { vc, vc_nocull, scorch }
+impl FromWorld for Mats {
+    fn from_world(world: &mut World) -> Self {
+        let mut mats = world.resource_mut::<Assets<StandardMaterial>>();
+        Mats {
+            vc: mats.add(StandardMaterial { base_color: Color::WHITE, perceptual_roughness: 0.82, metallic: 0.08, reflectance: 0.35, ..default() }),
+            scorch: mats.add(StandardMaterial { base_color: Color::srgb_u8(0x8a, 0x80, 0x7a), perceptual_roughness: 0.95, metallic: 0.05, ..default() }),
+        }
+    }
 }
 
 /// Unlit HDR material that blooms.
@@ -525,13 +506,6 @@ pub fn washer() -> Geo {
 pub fn fridge() -> Geo {
     let mut g = bx(0.8, 1.7, 0.75, hexc("#d9e1d6"), 0.3, 0.08);
     g.at(&bx(0.05, 0.5, 0.05, Pal::steel_dark(), 0.0, 0.07), 0.3, 0.3, 0.4);
-    g
-}
-
-pub fn person(shirt: Col) -> Geo {
-    let mut g = Geo::new();
-    g.at(&bx(0.36, 0.5, 0.24, shirt, 0.0, 0.12), 0.0, 0.25, 0.0);
-    g.at(&bx(0.26, 0.26, 0.26, hexc("#e8b48a"), 0.0, 0.08), 0.0, 0.66, 0.0);
     g
 }
 

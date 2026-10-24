@@ -1,13 +1,16 @@
-//! Run state: your bot, your stash, the tournament ladder.
-use crate::parts::{Builder, Design, Face, PartKind, Res, AddOpts};
+//! The current run: your bot, your stash, the tournament ladder.
+use crate::parts::{AddOpts, Builder, Design, Face, PartKind, Res};
 use crate::rng;
 use bevy::prelude::*;
+
+pub(super) fn plugin(app: &mut App) {
+    app.init_resource::<Run>();
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct BattleResult {
     pub won: bool,
     pub how: String,
-    pub time: f32,
     pub time_left: f32,
     pub dmg_dealt: f32,
     pub dmg_taken: f32,
@@ -27,8 +30,9 @@ pub struct InvItem {
     pub dmg: f32,
 }
 
+/// Everything that carries over between screens during one run.
 #[derive(Resource, Clone, Debug)]
-pub struct GameState {
+pub struct Run {
     pub design: Design,
     pub inv: Vec<InvItem>,
     pub next_uid: u32,
@@ -147,9 +151,15 @@ pub fn starter_design() -> Design {
     b.d
 }
 
-impl GameState {
+impl Default for Run {
+    fn default() -> Self {
+        Run::new_game()
+    }
+}
+
+impl Run {
     pub fn new_game() -> Self {
-        let mut s = GameState {
+        let mut s = Run {
             design: starter_design(),
             inv: vec![],
             next_uid: 1,

@@ -1,94 +1,56 @@
 //! Scrapheap Rumble — Bevy port.
 //! Flow: title -> workshop -> fight -> results -> scrapheap -> workshop ...
+//!
+//! Layout follows the `bevy_new_2d` template: every module exposes a
+//! `plugin(app)` function, screens live in `screens/` and are state-scoped,
+//! shared UI widgets and overlays live in `theme/`.
 mod ai;
 mod arena;
 mod audio;
-mod battle;
 mod fx;
-mod physics;
-mod robot;
 mod models;
+mod params;
 mod partmodels;
 mod parts;
+mod physics;
 mod preview;
-mod results;
 mod rng;
+mod robot;
 mod scene;
-mod scrap;
+mod screens;
 mod state;
-mod title;
-mod ui;
-mod workshop;
+mod theme;
 
+use bevy::asset::AssetMetaCheck;
 use bevy::prelude::*;
 
-#[derive(States, Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Screen {
-    #[default]
-    Title,
-    Workshop,
-    Fight,
-    Results,
-    Scrap,
+fn main() -> AppExit {
+    App::new().add_plugins(AppPlugin).run()
 }
 
-/// Everything spawned for the current screen; despawned on exit.
-#[derive(Component, Clone, Copy, Default)]
-pub struct Scoped;
+pub struct AppPlugin;
 
-fn clear_scoped(mut commands: Commands, q: Query<Entity, With<Scoped>>) {
-    for e in q.iter() {
-        commands.entity(e).try_despawn();
+impl Plugin for AppPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(
+            DefaultPlugins
+                .set(AssetPlugin {
+                    // there are no .meta files; don't make the web build 404 for each asset
+                    meta_check: AssetMetaCheck::Never,
+                    ..default()
+                })
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "Scrapheap Rumble".into(),
+                        canvas: Some("#view".into()),
+                        fit_canvas_to_parent: true,
+                        prevent_default_event_handling: true,
+                        ..default()
+                    }),
+                    ..default()
+                }),
+        );
+        app.insert_resource(ClearColor(Color::srgb_u8(0x8f, 0xc8, 0xef)));
+        app.add_plugins((audio::plugin, fx::plugin, models::plugin, scene::plugin, state::plugin, theme::plugin, screens::plugin));
     }
-}
-
-/// `?scene=fight&opp=2` style URL params (web) or SCRAP_* env vars (native).
-pub fn param(key: &str) -> Option<String> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let search = web_sys::window()?.location().search().ok()?;
-        for kv in search.trim_start_matches('?').split('&') {
-            let mut it = kv.splitn(2, '=');
-            if it.next() == Some(key) {
-                return Some(it.next().unwrap_or("").to_string());
-            }
-        }
-        None
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        std::env::var(format!("SCRAP_{}", key.to_uppercase())).ok()
-    }
-}
-
-fn start_screen(mut next: ResMut<NextState<Screen>>) {
-    match param("scene").as_deref() {
-        Some("workshop") => next.set(Screen::Workshop),
-        Some("fight") => next.set(Screen::Fight),
-        Some("scrap") => next.set(Screen::Scrap),
-        _ => {}
-    }
-}
-
-fn main() {
-    let mut app = App::new();
-    app.add_plugins(DefaultPlugins.set(WindowPlugin {
-        primary_window: Some(Window {
-            title: "Scrapheap Rumble".into(),
-            canvas: Some("#view".into()),
-            fit_canvas_to_parent: true,
-            prevent_default_event_handling: true,
-            ..default()
-        }),
-        ..default()
-    }))
-    .insert_resource(ClearColor(Color::srgb_u8(0x8f, 0xc8, 0xef)))
-    .insert_resource(state::GameState::new_game())
-    .init_state::<Screen>()
-    .add_plugins((ui::UiPlugin, audio::AudioPlugin, scene::ScenePlugin, title::TitlePlugin, battle::BattlePlugin, results::ResultsPlugin, workshop::WorkshopPlugin, scrap::ScrapPlugin))
-    .add_systems(Startup, start_screen);
-    for s in [Screen::Title, Screen::Workshop, Screen::Fight, Screen::Results, Screen::Scrap] {
-        app.add_systems(OnExit(s), clear_scoped);
-    }
-    app.run();
 }

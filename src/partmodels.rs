@@ -416,11 +416,10 @@ pub fn collision_shapes(kind: PartKind) -> Vec<ColShape> {
     });
     // order matters to the robot: wheels -> tyre first; spinner -> disc second
     let mut disc = disc;
-    if is_wheel {
-        if let Some(d) = disc.take() {
+    if is_wheel
+        && let Some(d) = disc.take() {
             out.push(d);
         }
-    }
     if stat.len() >= 4 {
         out.push(ColShape::Hull(stat));
     }
