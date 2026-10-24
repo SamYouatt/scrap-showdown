@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Scrapheap Rumble</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #8fc8ef; }
+    #view { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; outline: none; }
+    #loading { position: fixed; inset: 0; display: grid; place-items: center; font: 900 28px system-ui, sans-serif; color: #23212a; }
+  </style>
+</head>
+<body>
+  <div id="loading">Bolting it together…</div>
+  <canvas id="view" tabindex="0"></canvas>
+  <script type="module">
+    import init from './scrapheap.js';
+    init().catch((e) => {
+      // winit throws a control-flow "exception" on purpose; anything else is real
+      if (!String(e).includes('Using exceptions for control flow')) throw e;
+    }).finally(() => document.getElementById('loading')?.remove());
+    document.getElementById('view').focus();
+  </script>
+</body>
+</html>
