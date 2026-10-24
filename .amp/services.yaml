@@ -1,0 +1,12 @@
+services:
+  game:
+    command: ./dev-web.sh
+    health: /index.html
+    portal:
+      title: Scrapheap Rumble
+      description: First compilation takes several minutes. Edits rebuild automatically; refresh after the build finishes.
+    portals:
+      - url: /?scene=workshop
+        title: Workshop
+      - url: /?scene=fight&opp=2&test=1
+        title: Test fight

@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+echo "Installing missing Linux build dependencies"
+packages=(build-essential pkg-config curl ca-certificates xz-utils python3 binaryen
+  libasound2-dev libudev-dev libx11-dev libxkbcommon-dev libwayland-dev
+  libvulkan1 mesa-vulkan-drivers)
+missing=()
+for package in "${packages[@]}"; do
+  if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -qx 'install ok installed'; then
+    missing+=("$package")
+  fi
+done
+if ((${#missing[@]})); then
+  sudo apt-get update -qq
+  sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}"
+fi
+
+echo "Preparing the pinned Rust toolchain"
+if [[ ! -x "$HOME/.cargo/bin/rustup" ]]; then
+  curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+fi
+source "$HOME/.cargo/env"
+rustup show active-toolchain
+
+# Use release binaries rather than compiling the development tools in every orb.
+case "$(uname -m)" in
+  x86_64) arch=x86_64 ;;
+  aarch64) arch=aarch64 ;;
+  *) echo "Unsupported Linux architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+bindgen_version=$(python3 -c 'import tomllib; print(next(p["version"] for p in tomllib.load(open("Cargo.lock", "rb"))["package"] if p["name"] == "wasm-bindgen"))')
+if [[ "$(wasm-bindgen --version 2>/dev/null || true)" != "wasm-bindgen $bindgen_version" ]]; then
+  echo "Installing wasm-bindgen $bindgen_version (matches Cargo.lock)"
+  archive="wasm-bindgen-$bindgen_version-$arch-unknown-linux-musl"
+  curl -fsSL "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$bindgen_version/$archive.tar.gz" | tar -xz -C "$tmp"
+  install -m 755 "$tmp/$archive/wasm-bindgen" "$HOME/.cargo/bin/wasm-bindgen"
+fi
+watchexec_version=2.8.0
+if [[ "$(watchexec --version 2>/dev/null || true)" != "watchexec $watchexec_version "* ]]; then
+  echo "Installing watchexec $watchexec_version"
+  archive="watchexec-$watchexec_version-$arch-unknown-linux-musl"
+  curl -fsSL "https://github.com/watchexec/watchexec/releases/download/v$watchexec_version/$archive.tar.xz" | tar -xJ -C "$tmp"
+  install -m 755 "$tmp/$archive/watchexec" "$HOME/.cargo/bin/watchexec"
+fi
+
+echo "Fetching locked dependencies (compilation happens when developing)"
+cargo fetch --locked --target "$(rustc -vV | sed -n 's/^host: //p')" --target wasm32-unknown-unknown
+echo "Ready: amp orb services ensure"
