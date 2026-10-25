@@ -27,7 +27,7 @@ fn spawn_title(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mat
     let scope = DespawnOnExit(Screen::Title);
     models::reseed(3);
     scene::sun_lights(&mut commands, SunOpts { size: 6.0, dir: Vec3::new(4.0, 8.0, -6.0), ..default() }, scope.clone());
-    scene::sky_and_clouds(&mut commands, &mut meshes, &mut mats, Color::srgb_u8(0x4f, 0x9f, 0xe0), Color::srgb_u8(0xff, 0xe2, 0xb8), 10, 30.0, scope.clone());
+    scene::sky_and_clouds(&mut commands, &mut meshes, &mut mats, Color::srgb_u8(0x3f, 0x93, 0xe6), Color::srgb_u8(0xb8, 0xdc, 0xf6), 10, 30.0, scope.clone());
     let ground: Geo = models::cyl(6.0, 6.0, 0.4, 10, models::hexc("#c79a62"), 0.0);
     commands.spawn((Name::new("Plinth"), Mesh3d(meshes.add(ground.to_mesh())), MeshMaterial3d(shared.vc.clone()), Transform::from_xyz(0.0, -0.2, 0.0), scope.clone()));
     let opps = state::opponents();

@@ -642,7 +642,7 @@ fn spawn_yard(
     let c = &mut commands;
     let m = &mut *meshes;
     models::reseed(99);
-    scene::sun_lights(c, SunOpts { size: 14.0, dir: SUN_DIR, sun: hex("#ffd49a"), intensity: 1.15, sky: hex("#cfe6ff"), ground: hex("#c08a52") }, scope.clone());
+    scene::sun_lights(c, SunOpts { size: 14.0, dir: SUN_DIR, sun: hex("#ffd49a"), intensity: 1.1, sky: hex("#94baf2"), ground: hex("#c08a52") }, scope.clone());
     scene::sky_and_clouds(c, m, &mut mats, hex("#5b9fe0"), hex("#ffe2b8"), 12, 70.0, scope.clone());
     let mut obstacles = vec![];
     build_world(c, m, &mut mats, &shared, &mut obstacles);

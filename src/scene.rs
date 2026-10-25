@@ -7,6 +7,7 @@ use bevy::light::{CascadeShadowConfigBuilder, DirectionalLightShadowMap};
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::camera::Hdr;
+use bevy::render::view::{ColorGrading, ColorGradingGlobal, ColorGradingSection};
 use std::f32::consts::TAU;
 
 pub struct SunOpts {
@@ -21,7 +22,7 @@ pub struct SunOpts {
 impl Default for SunOpts {
     fn default() -> Self {
         SunOpts {
-            sky: Color::srgb_u8(0xb4, 0xc4, 0xe4),
+            sky: Color::srgb_u8(0x7c, 0xa4, 0xf0),
             ground: Color::srgb_u8(0xc0, 0x8a, 0x58),
             sun: Color::srgb_u8(0xff, 0xc9, 0x85),
             intensity: 1.0,
@@ -31,20 +32,29 @@ impl Default for SunOpts {
     }
 }
 
-/// Golden hour: a warm low key light over a cool sky fill and a warm ground
-/// bounce (a hemisphere light, approximated with ambient + an upward fill).
-pub fn sun_lights(commands: &mut Commands, o: SunOpts, scope: impl Bundle) {
+/// Golden hour: a strong warm key light, a cool sky fill so shadows go blue,
+/// and a rim light opposite the sun that outlines silhouettes.
+pub fn sun_lights(commands: &mut Commands, o: SunOpts, scope: impl Bundle + Clone) {
     commands.spawn((
-        DirectionalLight { color: o.sun, illuminance: 9_000.0 * o.intensity, shadow_maps_enabled: true, ..default() },
+        DirectionalLight { color: o.sun, illuminance: 11_000.0 * o.intensity, shadow_maps_enabled: true, ..default() },
         Transform::from_translation(o.dir).looking_at(Vec3::ZERO, Vec3::Y),
         CascadeShadowConfigBuilder { num_cascades: 1, maximum_distance: o.size * 3.5, first_cascade_far_bound: o.size * 3.5, ..default() }.build(),
         Name::new("Sun"),
+        scope.clone(),
+    ));
+    // WebGL2 allows only one directional light, so the rim is a distant point
+    // light: across from the sun, which is behind the subject for our cameras
+    let d = o.size * 1.5;
+    let rim = Vec3::new(-o.dir.x, o.dir.y * 0.6, -o.dir.z).normalize() * d;
+    commands.spawn((
+        Name::new("Rim"),
+        PointLight { color: Color::srgb_u8(0xff, 0xe6, 0xc4), intensity: 35_000.0 * d * d * o.intensity, range: d * 2.5, shadow_maps_enabled: false, ..default() },
+        Transform::from_translation(rim),
         scope,
     ));
-    // sky fill (WebGL2 allows only one directional light, so the warm ground
-    // bounce is folded into the ambient colour)
-    let fill = models::col_of(o.sky).lerp(models::col_of(o.ground), 0.3);
-    commands.insert_resource(GlobalAmbientLight { color: models::to_color(fill), brightness: 1400.0 * o.intensity, ..default() });
+    // a little warm ground bounce in a mostly sky-blue fill
+    let fill = models::col_of(o.sky).lerp(models::col_of(o.ground), 0.1);
+    commands.insert_resource(GlobalAmbientLight { color: models::to_color(fill), brightness: 1000.0 * o.intensity, ..default() });
 }
 
 /// Inverted gradient sphere + low-poly clouds circling the scene.
@@ -67,7 +77,8 @@ pub fn sky_and_clouds(
         let ph = j as f32 / segs as f32 * TAU;
         Vec3::new(th.sin() * ph.cos(), th.cos(), th.sin() * ph.sin())
     };
-    let col = |v: Vec3| b.lerp(t, (v.y * 1.4 + 0.15).clamp(0.0, 1.0));
+    // blue from just above the horizon; the pale band stays thin
+    let col = |v: Vec3| b.lerp(t, (v.y * 2.6 + 0.25).clamp(0.0, 1.0));
     for i in 0..rings {
         for j in 0..segs {
             let (a, bb, c, d) = (p(i, j), p(i + 1, j), p(i + 1, j + 1), p(i, j + 1));
@@ -112,6 +123,12 @@ pub fn camera_bundle(fov_deg: f32, transform: Transform) -> impl Bundle {
         Projection::Perspective(PerspectiveProjection { fov: fov_deg.to_radians(), near: 0.1, far: 400.0, ..default() }),
         Hdr,
         Tonemapping::AcesFitted,
+        // ACES mutes saturated colours; push them back toward the painted look
+        ColorGrading {
+            global: ColorGradingGlobal { post_saturation: 1.15, ..default() },
+            midtones: ColorGradingSection { contrast: 1.08, ..default() },
+            ..default()
+        },
         Bloom { intensity: 0.12, ..Bloom::NATURAL },
         Msaa::Sample4,
         transform,
