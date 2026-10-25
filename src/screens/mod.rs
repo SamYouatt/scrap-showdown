@@ -2,6 +2,7 @@
 //! spawns on `OnEnter`, tags what it spawns with `DespawnOnExit`, and gates
 //! its `Update` systems on `in_state`.
 mod fight;
+mod lookdev;
 mod results;
 mod scrap;
 mod title;
@@ -12,7 +13,7 @@ use bevy::prelude::*;
 
 pub(super) fn plugin(app: &mut App) {
     app.init_state::<Screen>();
-    app.add_plugins((title::plugin, workshop::plugin, fight::plugin, results::plugin, scrap::plugin));
+    app.add_plugins((title::plugin, workshop::plugin, fight::plugin, results::plugin, scrap::plugin, lookdev::plugin));
     app.add_systems(Startup, jump_to_screen);
 }
 
@@ -24,14 +25,16 @@ pub enum Screen {
     Fight,
     Results,
     Scrap,
+    Lookdev,
 }
 
-/// `?scene=workshop|fight|scrap` skips straight to a screen.
+/// `?scene=workshop|fight|scrap|lookdev` skips straight to a screen.
 fn jump_to_screen(mut next: ResMut<NextState<Screen>>) {
     match param("scene").as_deref() {
         Some("workshop") => next.set(Screen::Workshop),
         Some("fight") => next.set(Screen::Fight),
         Some("scrap") => next.set(Screen::Scrap),
+        Some("lookdev") => next.set(Screen::Lookdev),
         _ => {}
     }
 }

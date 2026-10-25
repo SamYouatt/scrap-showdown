@@ -47,6 +47,14 @@ if [[ "$(watchexec --version 2>/dev/null || true)" != "watchexec $watchexec_vers
   install -m 755 "$tmp/$archive/watchexec" "$HOME/.cargo/bin/watchexec"
 fi
 
+blender_version=4.5.9
+if [[ "$arch" == x86_64 && "$("$HOME/.local/blender/blender" --version 2>/dev/null | head -1 || true)" != "Blender $blender_version"* ]]; then
+  echo "Installing Blender $blender_version (headless asset baking: art/build.sh)"
+  rm -rf "$HOME/.local/blender" && mkdir -p "$HOME/.local/blender"
+  curl -fsSL "https://download.blender.org/release/Blender${blender_version%.*}/blender-$blender_version-linux-x64.tar.xz" \
+    | tar -xJ -C "$HOME/.local/blender" --strip-components=1
+fi
+
 echo "Fetching locked dependencies (compilation happens when developing)"
 cargo fetch --locked --target "$(rustc -vV | sed -n 's/^host: //p')" --target wasm32-unknown-unknown
 echo "Ready: amp orb services ensure"

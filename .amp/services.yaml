@@ -10,3 +10,5 @@ services:
         title: Workshop
       - url: /?scene=fight&opp=2&test=1
         title: Test fight
+      - url: /?scene=lookdev&spin=1
+        title: Art look-dev
