@@ -67,9 +67,6 @@ const fn bc(h: [f32; 3], c: [f32; 3]) -> Bounds {
     Bounds { h: Vec3::new(h[0], h[1], h[2]), c: Vec3::new(c[0], c[1], c[2]) }
 }
 
-/// Wedge profile in (z, y): back face against the surface, ramp down to a lip.
-pub const WEDGE_PROFILE: [(f32, f32); 4] = [(0.0, -0.19), (0.0, 0.19), (0.62, -0.17), (0.62, -0.21)];
-
 pub struct FlipCfg {
     pub hinge_y: f32,
     pub hinge_z: f32,

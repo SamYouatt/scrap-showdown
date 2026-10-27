@@ -1,12 +1,14 @@
-//! Look-dev turntable (`?scene=lookdev`): the current code-built parts next to
-//! the Blender-baked `.glb` versions, under the lighting we're developing.
+//! Look-dev turntable (`?scene=lookdev`): every Blender-made part around a test
+//! bot, under the game's lighting.
 //! Drag to orbit, scroll to zoom, Space toggles the turntable.
 //! `&yaw=&pitch=&dist=` (degrees, metres) fix the starting view for screenshots.
 use super::Screen;
 use crate::models::{self, Mats};
 use crate::params::param;
-use crate::parts::{Builder, Design, Face, PartKind};
-use crate::preview::spawn_preview;
+use crate::art::Art;
+use crate::parts::{ground_level, Builder, Design, Face, PartKind, Placed, KIND_ORDER, LEG_LEN};
+use crate::preview::{part_look, spawn_preview, spawn_static_part};
+use crate::robot::EyeMats;
 use crate::scene::{self, SunOpts};
 use crate::theme::prelude::*;
 use bevy::core_pipeline::tonemapping::Tonemapping;
@@ -16,7 +18,7 @@ use std::f32::consts::PI;
 
 pub(super) fn plugin(app: &mut App) {
     app.add_systems(OnEnter(Screen::Lookdev), spawn_lookdev);
-    app.add_systems(Update, (orbit, turntable, spin_wheels, glow_up, cycle_tonemapping).run_if(in_state(Screen::Lookdev)));
+    app.add_systems(Update, (orbit, turntable, cycle_tonemapping).run_if(in_state(Screen::Lookdev)));
 }
 
 #[derive(Resource)]
@@ -54,14 +56,10 @@ fn test_bot() -> Design {
     b.d
 }
 
-fn glb(assets: &AssetServer, name: &str) -> WorldAssetRoot {
-    WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(format!("models/{name}.glb"))))
-}
-
-fn spawn_lookdev(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>, shared: Res<Mats>, fonts: Res<Fonts>, assets: Res<AssetServer>) {
+fn spawn_lookdev(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>, shared: Res<Mats>, fonts: Res<Fonts>, art: Res<Art>, eyes: Res<EyeMats>) {
     let scope = DespawnOnExit(Screen::Lookdev);
     models::reseed(5);
-    commands.insert_resource(View { yaw: p("yaw", 25.0).to_radians(), pitch: p("pitch", 14.0).to_radians(), dist: p("dist", 3.4), spin: param("spin").is_some() });
+    commands.insert_resource(View { yaw: p("yaw", 25.0).to_radians(), pitch: p("pitch", 14.0).to_radians(), dist: p("dist", 6.0), spin: param("spin").is_some() });
 
     scene::sun_lights(&mut commands, SunOpts { size: 4.0, dir: Vec3::new(-5.0, 6.0, 4.0), sun: Color::srgb_u8(0xff, 0xc8, 0x82), intensity: p("sun", 1.0), ..default() }, scope.clone());
     scene::sky_and_clouds(&mut commands, &mut meshes, &mut mats, Color::srgb_u8(0x3a, 0x8c, 0xe6), Color::srgb_u8(0xb4, 0xdc, 0xf8), 10, 30.0, scope.clone());
@@ -71,31 +69,26 @@ fn spawn_lookdev(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut m
     commands.spawn((scene::camera_bundle(34.0, Transform::default()), Cam, scope.clone())).insert(tm.1);
 
     let table = commands.spawn((Name::new("Turntable"), Transform::default(), Visibility::default(), Turntable, scope.clone())).id();
-    let ride = 0.3;
-    // left (-X from the default camera): today's code-built bot
+    // centre: a test bot; around it, every part on its own
     let d = test_bot();
-    let old = spawn_preview(&mut commands, &mut meshes, &mut mats, &shared, &d, false, Transform::from_xyz(-0.85, ride, 0.0), scope.clone());
-    // right: the same parts from Blender
-    let new = commands.spawn((Name::new("Baked"), Transform::from_xyz(0.85, ride, 0.0), Visibility::default(), scope.clone())).id();
-    commands.entity(new).with_children(|c| {
-        for pl in &d.parts {
-            let name = match pl.kind {
-                PartKind::Core => "core",
-                PartKind::Wheel => "wheel",
-                PartKind::Spinner => "spinner",
-                _ => continue,
-            };
-            c.spawn((glb(&assets, name), Transform::from_translation(pl.pos).with_rotation(pl.rot), scope.clone()));
-        }
-    });
-    commands.entity(table).add_children(&[old, new]);
+    let bot = spawn_preview(&mut commands, &mut meshes, &art, &eyes, &d, false, Transform::from_xyz(0.0, -ground_level(&d), 0.0), scope.clone());
+    commands.entity(table).add_child(bot);
+    let n = KIND_ORDER.len();
+    for (i, &kind) in KIND_ORDER.iter().enumerate() {
+        let a = i as f32 / n as f32 * std::f32::consts::TAU;
+        let pl = Placed { id: 0, kind, parent: None, pos: Vec3::ZERO, rot: Quat::IDENTITY, dmg: 0.0, mirror: None };
+        // stand each part on the plinth facing outwards
+        let lift = -kind.def().bounds.c.y + kind.def().bounds.h.y + if kind == PartKind::Leg { LEG_LEN } else { 0.0 };
+        let tf = Transform::from_xyz(a.sin() * 2.2, lift, a.cos() * 2.2).with_rotation(Quat::from_rotation_y(a));
+        let e = spawn_static_part(&mut commands, &mut meshes, &art, &pl, &part_look(d.paint, &eyes), tf, scope.clone());
+        commands.entity(table).add_child(e);
+    }
 
     if param("ui") != Some("0".into()) {
         let root = Node { width: Val::Percent(100.0), height: Val::Percent(100.0), flex_direction: FlexDirection::Column, justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Center, padding: UiRect::vertical(Val::Px(16.0)), ..default() };
         commands.spawn((widget::ui_root("Lookdev UI", root), scope)).with_children(|p| {
             p.spawn(Node { width: Val::Percent(100.0), justify_content: JustifyContent::SpaceAround, ..default() }).with_children(|r| {
-                r.spawn(widget::text(&fonts, "Current (code, vertex colours)", 18.0, CREAM));
-                r.spawn(widget::text(&fonts, "Blender (baked textures)", 18.0, CREAM));
+                r.spawn(widget::text(&fonts, "Parts (Blender, baked textures)", 18.0, CREAM));
             });
             p.spawn((widget::text(&fonts, hint(tm.0), 14.0, CREAM), TmLabel));
         });
@@ -122,35 +115,6 @@ fn orbit(mut v: ResMut<View>, mouse: Res<ButtonInput<MouseButton>>, keys: Res<Bu
 fn turntable(v: Res<View>, time: Res<Time>, mut t: Single<&mut Transform, With<Turntable>>) {
     if v.spin {
         t.rotate_y(time.delta_secs() * PI / 8.0);
-    }
-}
-
-/// The wheel's tyre is the glTF node named "spin"; roll it like the game does.
-fn spin_wheels(v: Res<View>, time: Res<Time>, mut q: Query<(&Name, &mut Transform)>) {
-    if !v.spin {
-        return;
-    }
-    for (n, mut t) in &mut q {
-        if n.as_str() == "spin" {
-            t.rotate_local_z(time.delta_secs() * 2.0);
-        }
-    }
-}
-
-/// glTF eyes/tips get the game's blooming glow material.
-fn glow_up(named: Query<(&Name, &Children), Added<Name>>, mut meshes: Query<&mut MeshMaterial3d<StandardMaterial>>, mut mats: ResMut<Assets<StandardMaterial>>) {
-    for (n, kids) in &named {
-        let col = match n.as_str() {
-            s if s.starts_with("glow_eye") => models::hexc("#ffd25a"),
-            s if s.starts_with("glow_tip") => models::hexc("#ff5a3c"),
-            _ => continue,
-        };
-        let m = models::glow_mat(&mut mats, col, 3.0);
-        for &k in kids {
-            if let Ok(mut mm) = meshes.get_mut(k) {
-                mm.0 = m.clone();
-            }
-        }
     }
 }
 

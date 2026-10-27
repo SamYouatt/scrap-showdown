@@ -3,8 +3,9 @@
 //! act along their own mounted axes, and parts that break off into debris.
 use crate::audio::{Hum, HumKind, Sfx, Snd};
 use crate::fx::Fx;
-use crate::models::{self, Col, Mats};
-use crate::partmodels::{build_part, collision_shapes, hammer_arm_hulls, ColShape};
+use crate::models::{self, Col};
+use crate::art::Art;
+use crate::partmodels::{collision_shapes, hammer_arm_hulls, key, spawn_part, ColShape, PartLook};
 use crate::parts::*;
 use crate::physics::{grp, groups, Phys, GRAVITY};
 use crate::rng;
@@ -60,11 +61,15 @@ pub enum Eyes {
 
 /// Glowing eye materials shared by every robot.
 #[derive(Resource)]
-pub struct EyeMats([Handle<StandardMaterial>; 3]);
+pub struct EyeMats([Handle<StandardMaterial>; 4]);
 
 impl EyeMats {
     pub fn get(&self, e: Eyes) -> Handle<StandardMaterial> {
         self.0[e as usize].clone()
+    }
+    /// the antenna's tip light
+    pub fn tip(&self) -> Handle<StandardMaterial> {
+        self.0[3].clone()
     }
 }
 
@@ -75,6 +80,7 @@ impl FromWorld for EyeMats {
             models::glow_mat(&mut mats, models::hexc("#ffd25a"), 2.4),
             models::glow_mat(&mut mats, models::hexc("#ff6a3c"), 2.4),
             models::glow_mat(&mut mats, models::hexc("#3a3335"), 1.0),
+            models::glow_mat(&mut mats, models::hexc("#ff5a3c"), 3.0),
         ])
     }
 }
@@ -131,6 +137,8 @@ pub struct RPart {
     pub scorched: bool,
     // visuals
     pub ent: Entity,
+    /// battered copy of the part's material
+    pub scorch: Handle<StandardMaterial>,
     pub spin_ent: Option<(Entity, Vec3)>,
     pub arm_ent: Option<(Entity, Vec3)>,
     pub eyes: Vec<(Entity, Transform)>,
@@ -214,8 +222,8 @@ pub struct Robot {
 pub struct Spawn<'a, 'w, 's> {
     pub commands: &'a mut Commands<'w, 's>,
     pub meshes: &'a mut Assets<Mesh>,
-    pub shared: &'a Mats,
     pub glow: &'a EyeMats,
+    pub art: &'a Art,
     pub sfx: &'a mut Vec<Sfx>,
 }
 
@@ -333,7 +341,6 @@ impl Robot {
     fn add_part<S: Bundle + Clone>(&mut self, sp: &mut Spawn, phys: &mut Phys, part_of: &mut PartOf, pl: &Placed, leg_idx: usize, scope: S) {
         let kind = pl.kind;
         let def = kind.def();
-        let model = build_part(kind, self.paint);
         let (pos, quat) = (pl.pos, pl.rot);
         let mut mount = pos;
         let mut axle = quat * Vec3::Z;
@@ -346,40 +353,13 @@ impl Robot {
         } else if kind == PartKind::Leg {
             mount = quat * Vec3::new(0.0, 0.0, 0.19) + pos;
         }
-        let vc = sp.shared.vc.clone();
-        let ent = sp.commands.spawn((Mesh3d(sp.meshes.add(model.body.to_mesh())), MeshMaterial3d(vc.clone()), Transform { translation: pos, rotation: quat, ..default() }, scope.clone())).id();
+        let look = PartLook { paint: self.paint, worn: false, ghost: None, eye: sp.glow.get(Eyes::Calm), tip: sp.glow.tip() };
+        let pe = spawn_part(sp.commands, sp.meshes, sp.art, kind, &look, Transform { translation: pos, rotation: quat, ..default() }, scope.clone());
+        let ent = pe.ent;
         sp.commands.entity(self.root).add_child(ent);
-        let mut spin_ent = None;
-        if let Some((g, o)) = &model.spin {
-            let e = sp.commands.spawn((Mesh3d(sp.meshes.add(g.to_mesh())), MeshMaterial3d(vc.clone()), Transform::from_translation(*o), scope.clone())).id();
-            sp.commands.entity(ent).add_child(e);
-            spin_ent = Some((e, *o));
-        }
-        let mut arm_ent = None;
-        if let Some((g, o)) = &model.arm {
-            let e = sp.commands.spawn((Mesh3d(sp.meshes.add(g.to_mesh())), MeshMaterial3d(vc.clone()), Transform::from_translation(*o), scope.clone())).id();
-            sp.commands.entity(ent).add_child(e);
-            arm_ent = Some((e, *o));
-        }
-        let mut eyes = vec![];
-        for (g, t, _) in &model.glow {
-            let e = sp.commands.spawn((Mesh3d(sp.meshes.add(g.to_mesh())), MeshMaterial3d(sp.glow.get(Eyes::Calm)), *t, bevy::light::NotShadowCaster, scope.clone())).id();
-            sp.commands.entity(ent).add_child(e);
-            eyes.push((e, *t));
-        }
-        let mut whip = None;
-        if let Some(w) = &model.whip {
-            let mut g = w.rod.clone();
-            g.add(&models::ico(0.035, w.tip_col * 2.0), Transform::from_translation(w.tip));
-            let e = sp.commands.spawn((Mesh3d(sp.meshes.add(g.to_mesh())), MeshMaterial3d(vc.clone()), Transform::from_translation(w.origin), scope.clone())).id();
-            sp.commands.entity(ent).add_child(e);
-            whip = Some((e, w.origin, w.tip + Vec3::Y * 0.04));
-        }
-        let mut legs = None;
-        if let Some(l) = &model.leg {
-            let mk = |sp: &mut Spawn, g: &models::Geo| sp.commands.spawn((Mesh3d(sp.meshes.add(g.to_mesh())), MeshMaterial3d(vc.clone()), Transform::default(), scope.clone())).id();
-            legs = Some(LegEnts { upper: mk(sp, &l.upper), lower: mk(sp, &l.lower), foot: mk(sp, &l.foot) });
-        }
+        let (spin_ent, arm_ent, eyes, whip) = (pe.spin, pe.arm, pe.eyes, pe.whip);
+        let legs = pe.legs.map(|[upper, lower, foot]| LegEnts { upper, lower, foot });
+        let scorch = sp.art.piece(&key(kind, "body")).scorch.clone();
         let mut p = RPart {
             placed: pl.clone(),
             kind,
@@ -421,19 +401,20 @@ impl Robot {
             loosen: Quat::IDENTITY,
             scorched: false,
             ent,
+            scorch,
             spin_ent,
             arm_ent,
             eyes,
             whip,
             legs,
         };
-        self.build_colliders(phys, part_of, &mut p);
+        self.build_colliders(sp.art, phys, part_of, &mut p);
         self.parts.push(p);
         let i = self.parts.len() - 1;
         for c in self.parts[i].colliders.clone() {
             part_of.insert(c, (self.team, i));
         }
-        self.refresh_damage_look(phys, i, sp.commands, sp.shared);
+        self.refresh_damage_look(phys, i, sp.commands);
     }
 
     fn collider_pose(p: &RPart, t: Vec3, q: Quat) -> Pose {
@@ -441,10 +422,10 @@ impl Robot {
         Pose::from_parts(pq * t + p.pos, pq * q)
     }
 
-    fn build_colliders(&self, phys: &mut Phys, _part_of: &mut PartOf, p: &mut RPart) {
+    fn build_colliders(&self, art: &Art, phys: &mut Phys, _part_of: &mut PartOf, p: &mut RPart) {
         let kind = p.kind;
         let mut shapes: Vec<(ColliderBuilder, Vec3, Quat)> = vec![];
-        for s in collision_shapes(kind) {
+        for s in collision_shapes(art, kind) {
             match s {
                 ColShape::Hull(pts) => {
                     if let Some(b) = ColliderBuilder::convex_hull(&pts) {
@@ -480,7 +461,7 @@ impl Robot {
         }
         if kind == PartKind::Hammer {
             // arm + head: real colliders that follow the swing (see pose_hammer)
-            let (shaft, head) = hammer_arm_hulls();
+            let (shaft, head) = hammer_arm_hulls(art);
             for pts in [shaft, head] {
                 if let Some(b) = ColliderBuilder::convex_hull(&pts) {
                     let b = b
@@ -1285,7 +1266,7 @@ impl Robot {
     }
 
     // ------------------------------------------------------------------ damage
-    fn refresh_damage_look(&mut self, phys: &mut Phys, i: usize, commands: &mut Commands, shared: &Mats) {
+    fn refresh_damage_look(&mut self, phys: &mut Phys, i: usize, commands: &mut Commands) {
         let p = &mut self.parts[i];
         let f = p.hp / p.max_hp;
         if f < 0.6 {
@@ -1301,7 +1282,7 @@ impl Robot {
         if f < 0.35 && !p.scorched {
             p.scorched = true;
             for e in [Some(p.ent), p.spin_ent.map(|x| x.0), p.arm_ent.map(|x| x.0)].into_iter().flatten() {
-                commands.entity(e).insert(MeshMaterial3d(shared.scorch.clone()));
+                commands.entity(e).insert(MeshMaterial3d(p.scorch.clone()));
             }
         }
     }
@@ -1318,7 +1299,7 @@ impl Robot {
         }
         self.damage_taken += dmg;
         self.mood = 2.5;
-        self.refresh_damage_look(dc.phys, i, dc.commands, dc.shared);
+        self.refresh_damage_look(dc.phys, i, dc.commands);
         if self.parts[i].hp <= 0.0 {
             self.parts[i].hp = 0.0;
             if i == self.core {
@@ -1590,7 +1571,6 @@ pub struct DetachCtx<'a, 'w, 's> {
     pub fx: &'a mut Fx,
     pub sfx: &'a mut Vec<Sfx>,
     pub commands: &'a mut Commands<'w, 's>,
-    pub shared: &'a Mats,
     pub debris: &'a mut Vec<Debris>,
     pub detached: &'a mut Vec<(usize, usize)>,
     pub hit_stop: f32,

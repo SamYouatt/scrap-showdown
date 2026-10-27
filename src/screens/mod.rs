@@ -14,12 +14,13 @@ use bevy::prelude::*;
 pub(super) fn plugin(app: &mut App) {
     app.init_state::<Screen>();
     app.add_plugins((title::plugin, workshop::plugin, fight::plugin, results::plugin, scrap::plugin, lookdev::plugin));
-    app.add_systems(Startup, jump_to_screen);
 }
 
 #[derive(States, Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Screen {
+    /// waiting for the models (see art.rs)
     #[default]
+    Loading,
     Title,
     Workshop,
     Fight,
@@ -28,13 +29,13 @@ pub enum Screen {
     Lookdev,
 }
 
-/// `?scene=workshop|fight|scrap|lookdev` skips straight to a screen.
-fn jump_to_screen(mut next: ResMut<NextState<Screen>>) {
+/// The screen after loading: the title, or `?scene=workshop|fight|scrap|lookdev`.
+pub fn first_screen() -> Screen {
     match param("scene").as_deref() {
-        Some("workshop") => next.set(Screen::Workshop),
-        Some("fight") => next.set(Screen::Fight),
-        Some("scrap") => next.set(Screen::Scrap),
-        Some("lookdev") => next.set(Screen::Lookdev),
-        _ => {}
+        Some("workshop") => Screen::Workshop,
+        Some("fight") => Screen::Fight,
+        Some("scrap") => Screen::Scrap,
+        Some("lookdev") => Screen::Lookdev,
+        _ => Screen::Title,
     }
 }

@@ -7,9 +7,12 @@
 //! `Tool` or the [`Run`] change.
 use super::Screen;
 use crate::audio::{Sfx, Snd};
-use crate::models::{self, Mats};
+use crate::models;
 use crate::parts::{compute_stats, face_point, mirror_xf, orient_on, Category, Design, Face, PartKind, Placed, Res as Stock, KIND_ORDER};
-use crate::preview::{part_geo, spawn_preview};
+use crate::art::Art;
+use crate::partmodels::PartLook;
+use crate::preview::{part_look, spawn_preview, spawn_static_part};
+use crate::robot::EyeMats;
 use crate::scene::{self, SunOpts};
 use crate::state::{self, InvItem, Run, FAB_COST};
 use crate::theme::prelude::*;
@@ -17,13 +20,13 @@ use bevy::ecs::system::SystemParam;
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
-use std::f32::consts::{FRAC_PI_4, PI, TAU};
+use std::f32::consts::{FRAC_PI_4, TAU};
 
 const BENCH_Y: f32 = 0.9;
 const SNAP: f32 = 0.05;
 const TILTS: [f32; 4] = [0.0, 0.4, 0.8, -0.4];
 const PAINTS: [&str; 8] = ["#e2483d", "#f2b632", "#3f7fd8", "#3fa7a3", "#7c5bb5", "#5a8a3a", "#ee7a32", "#e8e0d0"];
-const BG: Color = Color::srgb(0.227, 0.216, 0.267); // #3a3744
+const BG: Color = Color::srgb(0.18, 0.149, 0.125); // #2e2620, a dark warm roof
 /// how far the pointer may move before a press becomes an orbit drag
 const DRAG_PX: f32 = 6.0;
 
@@ -136,7 +139,7 @@ struct WsCam;
 #[derive(Component)]
 struct WsBot;
 #[derive(Component)]
-struct Ghost(usize);
+struct Ghost(usize, Handle<StandardMaterial>);
 #[derive(Component)]
 struct LeftCol;
 #[derive(Component)]
@@ -381,30 +384,37 @@ fn spawn_workshop(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
-    shared: Res<Mats>,
     fonts: Res<Fonts>,
     mut s: ResMut<Run>,
     mut toasts: MessageWriter<Toast>,
     mut gizmo_cfg: ResMut<GizmoConfigStore>,
+    art: Res<Art>,
 ) {
     let scope = DespawnOnExit(Screen::Workshop);
     s.testing = false;
     let (gizmos, _) = gizmo_cfg.config_mut::<DefaultGizmoConfigGroup>();
     gizmos.depth_bias = -1.0;
     gizmos.line.width = 2.5;
-    scene::sun_lights(&mut commands, SunOpts { size: 4.0, dir: Vec3::new(4.0, 10.0, -5.0), intensity: 1.0, sky: Color::srgb_u8(0xe8, 0xee, 0xf5), ground: Color::srgb_u8(0x8a, 0x80, 0x90), ..default() }, scope.clone());
-    // plain studio: a floor and the turntable, nothing in the way
-    models::reseed(11);
-    let mut env = models::cyl(40.0, 40.0, 0.2, 32, models::hexc("#4a4655"), 0.0).transformed(Transform::from_xyz(0.0, BENCH_Y - 0.1, 0.0));
-    env.add(&models::cyl(1.75, 1.8, 0.06, 28, models::hexc("#5c5868"), 0.0), Transform::from_xyz(0.0, BENCH_Y + 0.03, 0.0));
-    for i in 0..12 {
-        let a = i as f32 / 12.0 * TAU;
-        let c = if i % 3 != 0 { models::hexc("#7a7586") } else { models::Pal::yellow() };
-        env.add(&models::bx(0.04, 0.012, 0.18, c, 0.0, 0.0), Transform::from_xyz(a.sin() * 1.6, BENCH_Y + 0.065, a.cos() * 1.6).with_rotation(Quat::from_rotation_y(a)));
+    // warm garage: steep strip-light "sun", brown bounce, warm point lights under the strips
+    scene::sun_lights(&mut commands, SunOpts { size: 4.0, dir: Vec3::new(2.0, 12.0, -3.0), sun: Color::srgb_u8(0xff, 0xe4, 0xc4), intensity: 0.55, sky: Color::srgb_u8(0xb4, 0xb2, 0xb4), ground: Color::srgb_u8(0x6e, 0x60, 0x54) }, scope.clone());
+    for p in [Vec3::new(0.0, 3.6, -10.6), Vec3::new(10.6, 3.6, 0.0), Vec3::new(-10.6, 3.6, 0.0), Vec3::new(7.0, 3.6, 10.6), Vec3::new(-7.0, 3.6, 10.6)] {
+        commands.spawn((PointLight { color: Color::srgb_u8(0xff, 0xd9, 0xa0), intensity: 60_000.0, range: 8.0, shadow_maps_enabled: false, ..default() }, Transform::from_translation(p + Vec3::Y * BENCH_Y), scope.clone()));
     }
-    // "front" marker so you know which way the bot faces
-    env.add(&models::cyl(0.0, 0.22, 0.05, 3, models::Pal::yellow(), 0.0), Transform::from_xyz(0.0, BENCH_Y + 0.07, 1.95).with_rotation(Quat::from_rotation_y(PI)));
-    commands.spawn((Name::new("Turntable"), Mesh3d(meshes.add(env.to_mesh())), MeshMaterial3d(shared.vc.clone()), scope.clone()));
+    // the garage (art/workshop.py): floor top at BENCH_Y, turntable deck on top
+    let strip = models::glow_mat(&mut mats, models::hexc("#fff4dc"), 2.6);
+    let day = models::glow_mat(&mut mats, models::hexc("#fff1d0"), 2.0);
+    let amber = models::glow_mat(&mut mats, models::hexc("#ffb04a"), 3.0);
+    let ring = models::glow_mat(&mut mats, models::hexc("#f2b632"), 1.6);
+    let pick = |n: &str| match n {
+        "glow_ring" => ring.clone(),
+        "glow_door_gap" => day.clone(),
+        "glow_lamp" => amber.clone(),
+        _ => strip.clone(),
+    };
+    for a in ["ws_floor", "ws_wall_back", "ws_wall_left", "ws_wall_right", "ws_wall_front", "ws_bench", "ws_props", "ws_corners"] {
+        art.spawn_all(&mut commands, &mut meshes, a, &[], Transform::from_xyz(0.0, BENCH_Y, 0.0), pick, scope.clone());
+    }
+    art.spawn_all(&mut commands, &mut meshes, "ws_turntable", &[], Transform::from_xyz(0.0, BENCH_Y + 0.06, 0.0), pick, (Name::new("Turntable"), scope.clone()));
     commands.spawn((
         scene::camera_bundle(38.0, Transform::default()),
         Camera { clear_color: ClearColorConfig::Custom(BG), ..default() },
@@ -414,7 +424,7 @@ fn spawn_workshop(
     ));
     let ghost_mat = mats.add(StandardMaterial { base_color: Color::srgba(0.61, 1.0, 0.48, 0.45), unlit: true, alpha_mode: AlphaMode::Blend, ..default() });
     for i in 0..2 {
-        commands.spawn((Name::new("Ghost"), Ghost(i), Mesh3d::default(), MeshMaterial3d(ghost_mat.clone()), Transform::default(), Visibility::Hidden, scope.clone()));
+        commands.spawn((Name::new("Ghost"), Ghost(i, ghost_mat.clone()), Transform::default(), Visibility::Hidden, scope.clone()));
     }
 
     // never let a run softlock with no way to move
@@ -456,7 +466,9 @@ fn spawn_workshop(
         children![(widget::text(&fonts, "", 15.0, CREAM), TextLayout::default().with_no_wrap(), Pickable::IGNORE)],
     ));
 
-    commands.insert_resource(Orbit { az: 0.7, elev: 0.5, dist: 5.2, press: None });
+    // `?yaw=&pitch=&dist=` (degrees, metres) fix the starting view for screenshots
+    let pf = |k: &str, d: f32| crate::params::param(k).and_then(|v| v.parse::<f32>().ok()).unwrap_or(d);
+    commands.insert_resource(Orbit { az: pf("yaw", 40.0).to_radians(), elev: pf("pitch", 28.6).to_radians(), dist: pf("dist", 5.2), press: None });
     commands.insert_resource(Hover::default());
     commands.insert_resource(Tool { sel: None, sel_uid: None, roll: 0.0, tilt: 0.0, mirror: true, undo: vec![] });
 }
@@ -735,11 +747,11 @@ fn on_action(ev: On<Activate>, actions: Query<&WsAction>, mut tool: If<ResMut<To
 }
 
 // ------------------------------------------------------------------ 3D feedback
-fn rebuild_bot(mut commands: Commands, s: Res<Run>, old: Query<Entity, With<WsBot>>, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>, shared: Res<Mats>) {
+fn rebuild_bot(mut commands: Commands, s: Res<Run>, old: Query<Entity, With<WsBot>>, mut meshes: ResMut<Assets<Mesh>>, art: Res<Art>, eyes: Res<EyeMats>) {
     for e in &old {
         commands.entity(e).despawn();
     }
-    let e = spawn_preview(&mut commands, &mut meshes, &mut mats, &shared, &s.design, true, Transform::from_xyz(0.0, bot_y(&s.design), 0.0), DespawnOnExit(Screen::Workshop));
+    let e = spawn_preview(&mut commands, &mut meshes, &art, &eyes, &s.design, true, Transform::from_xyz(0.0, bot_y(&s.design), 0.0), DespawnOnExit(Screen::Workshop));
     commands.entity(e).insert(WsBot);
 }
 
@@ -751,7 +763,10 @@ fn show_ghosts(
     mut key: Local<Option<(PartKind, [i32; 4], [u8; 4])>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
-    mut q: Query<(&Ghost, &mut Mesh3d, &MeshMaterial3d<StandardMaterial>, &mut Transform, &mut Visibility)>,
+    mut commands: Commands,
+    art: Res<Art>,
+    eyes: Res<EyeMats>,
+    mut q: Query<(Entity, &Ghost, &mut Transform, &mut Visibility)>,
 ) {
     let root = Vec3::new(0.0, bot_y(&s.design), 0.0);
     let plan = hover.plan.as_ref();
@@ -760,16 +775,19 @@ fn show_ghosts(
     let rebuild = k != *key;
     *key = k;
     let xs = [plan.map(|p| p.a), plan.and_then(|p| p.b.map(|b| b.0))];
-    for (g, mut mesh, mat, mut tf, mut vis) in &mut q {
+    for (ge, g, mut tf, mut vis) in &mut q {
         let x = xs[g.0];
         *vis = if x.is_some() { Visibility::Visible } else { Visibility::Hidden };
         let (Some(x), Some(p)) = (x, plan) else { continue };
         if rebuild {
+            commands.entity(ge).despawn_related::<Children>();
             let pl = Placed { id: 0, kind: p.kind, parent: None, pos: x.pos, rot: x.rot, dmg: 0.0, mirror: None };
-            mesh.0 = meshes.add(part_geo(&pl, models::col_of(s.design.paint)).0.to_mesh());
+            let look = PartLook { ghost: Some(g.1.clone()), ..part_look(s.design.paint, &eyes) };
+            let e = spawn_static_part(&mut commands, &mut meshes, &art, &pl, &look, Transform::IDENTITY, bevy::light::NotShadowCaster);
+            commands.entity(ge).add_child(e);
         }
         *tf = Transform { translation: root + x.pos, rotation: x.rot, ..default() };
-        if let Some(mut m) = mats.get_mut(&mat.0) {
+        if let Some(mut m) = mats.get_mut(&g.1) {
             let a = 0.4 + (time.elapsed_secs() * 8.0).sin() * 0.1;
             m.base_color = if p.why.is_some() { Color::srgba(1.0, 0.35, 0.29, a) } else { Color::srgba(0.61, 1.0, 0.48, a) };
         }

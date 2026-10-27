@@ -1,7 +1,8 @@
 //! Static (no physics) robot model for the workshop, title screen, etc.
-use crate::models::{self, Geo, Mats};
-use crate::partmodels::build_part;
+use crate::art::Art;
+use crate::partmodels::{spawn_part, PartLook};
 use crate::parts::{ground_level, Design, Placed, LEG_LEN};
+use crate::robot::{EyeMats, Eyes};
 use bevy::prelude::*;
 
 /// Root of a spawned preview; `ride` is how high the core sits off the floor.
@@ -10,8 +11,9 @@ pub struct PreviewRoot {
     pub ride: f32,
 }
 
-/// Leg segments posed standing on the floor, in the part's local space.
-pub fn static_leg(p: &Placed, upper: &Geo, lower: &Geo, foot: &Geo) -> Geo {
+/// Leg segments (upper, lower, foot) posed standing on the floor, in the
+/// part's local space.
+pub fn static_leg(p: &Placed) -> [Transform; 3] {
     let q = p.rot;
     let inv = q.inverse();
     let hip = Vec3::new(0.0, 0.0, 0.19);
@@ -26,73 +28,58 @@ pub fn static_leg(p: &Placed, upper: &Geo, lower: &Geo, foot: &Geo) -> Geo {
     let back = inv * Vec3::NEG_Z;
     let knee = hip.lerp(foot_p, 0.5) + up * 0.12 + outward * 1.2 + back * 0.2 * (1.0 - sprawl);
     let look = |from: Vec3, to: Vec3| Quat::from_rotation_arc(Vec3::Z, (to - from).normalize_or(Vec3::Z));
-    let mut g = Geo::new();
-    g.add(upper, Transform { translation: hip, rotation: look(hip, knee), ..default() });
-    g.add(lower, Transform { translation: knee, rotation: look(knee, foot_p), ..default() });
-    g.add(foot, Transform { translation: foot_p, rotation: inv, ..default() });
-    g
+    [
+        Transform { translation: hip, rotation: look(hip, knee), ..default() },
+        Transform { translation: knee, rotation: look(knee, foot_p), ..default() },
+        Transform { translation: foot_p, rotation: inv, ..default() },
+    ]
 }
 
-/// One part's merged mesh at rest (moving bits baked in, legs standing), in
-/// part-local space, plus the part model for its glowing bits.
-pub fn part_geo(pl: &Placed, paint: models::Col) -> (Geo, crate::partmodels::PartModel) {
-    let m = build_part(pl.kind, paint);
-    let mut g = m.body.clone();
-    if let Some((s, o)) = &m.spin {
-        g.add(s, Transform::from_translation(*o));
+/// Spawn one part at rest (moving bits at their rest pose, legs standing) at
+/// `t`; returns the part's entity.
+pub fn spawn_static_part(commands: &mut Commands, meshes: &mut Assets<Mesh>, art: &Art, pl: &Placed, look: &PartLook, t: Transform, extra: impl Bundle + Clone) -> Entity {
+    let pe = spawn_part(commands, meshes, art, pl.kind, look, t, extra);
+    let rest = match pl.kind {
+        crate::parts::PartKind::Hammer => crate::parts::HAMMER.rest,
+        _ => crate::parts::FLIP.rest,
+    };
+    if let Some((e, pivot)) = pe.arm {
+        commands.entity(e).insert(Transform { translation: pivot, rotation: Quat::from_rotation_x(-rest), ..default() });
     }
-    if let Some((a, o)) = &m.arm {
-        let rest = match pl.kind {
-            crate::parts::PartKind::Hammer => crate::parts::HAMMER.rest,
-            _ => crate::parts::FLIP.rest,
-        };
-        g.add(a, Transform { translation: *o, rotation: Quat::from_rotation_x(-rest), ..default() });
+    if let Some(legs) = pe.legs {
+        for (e, tf) in legs.into_iter().zip(static_leg(pl)) {
+            commands.entity(e).insert(tf);
+            commands.entity(pe.ent).add_child(e);
+        }
     }
-    if let Some(w) = &m.whip {
-        g.add(&w.rod, Transform::from_translation(w.origin));
-        g.add(&models::ico(0.035, w.tip_col * 1.5), Transform::from_translation(w.origin + w.tip));
-    }
-    if let Some(l) = &m.leg {
-        g.add0(&static_leg(pl, &l.upper, &l.lower, &l.foot));
-    }
-    (g, m)
+    pe.ent
 }
 
-/// Spawn a static bot. Each part is one merged mesh (moving bits baked in at
-/// their rest pose). Returns the root entity.
+pub fn part_look(paint: Color, eyes: &EyeMats) -> PartLook {
+    PartLook { paint: crate::models::col_of(paint), worn: false, ghost: None, eye: eyes.get(Eyes::Calm), tip: eyes.tip() }
+}
+
+/// Spawn a static bot. Returns the root entity.
 pub fn spawn_preview(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
-    mats: &mut Assets<StandardMaterial>,
-    shared: &Mats,
+    art: &Art,
+    eyes: &EyeMats,
     d: &Design,
     show_damage: bool,
     transform: Transform,
     extra: impl Bundle + Clone,
 ) -> Entity {
     let ride = -ground_level(d);
-    let paint = models::col_of(d.paint);
     let root = commands.spawn((Name::new(d.name.clone()), transform, Visibility::default(), PreviewRoot { ride }, extra.clone())).id();
     for pl in &d.parts {
-        let (mut g, m) = part_geo(pl, paint);
+        let mut look = part_look(d.paint, eyes);
         let mut rot = pl.rot;
         if show_damage && pl.dmg > 0.45 {
-            g.tint(Vec3::new(0.62, 0.57, 0.54));
+            look.worn = true;
             rot *= Quat::from_rotation_z(pl.dmg * 0.15 * if pl.id % 2 == 1 { 1.0 } else { -1.0 });
         }
-        let child = commands
-            .spawn((
-                Mesh3d(meshes.add(g.to_mesh())),
-                MeshMaterial3d(shared.vc.clone()),
-                Transform { translation: pl.pos, rotation: rot, ..default() },
-                extra.clone(),
-            ))
-            .with_children(|c| {
-                for (eye, t, col) in &m.glow {
-                    c.spawn((Mesh3d(meshes.add(eye.to_mesh())), MeshMaterial3d(models::glow_mat(mats, *col, 3.0)), *t, extra.clone()));
-                }
-            })
-            .id();
+        let child = spawn_static_part(commands, meshes, art, pl, &look, Transform { translation: pl.pos, rotation: rot, ..default() }, extra.clone());
         commands.entity(root).add_child(child);
     }
     root

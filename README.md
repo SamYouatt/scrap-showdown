@@ -62,6 +62,23 @@ Builds use `--locked`, so update the lockfile explicitly when changing dependenc
 WebAssembly packaging defaults to one worker to fit the orb's memory limit;
 larger machines can override this with `RAYON_NUM_THREADS`.
 
+### Art pipeline
+
+Every model (robot parts, arena, workshop, scrapyard, junk) is made in Blender
+by `art/*.py` and baked to `assets/models/*.glb`. `art/lib.py` holds the shared
+wear materials, modelling helpers and bake/export; `parts.py`, `arena.py`,
+`workshop.py`, `yard.py` and `props.py` each define `ASSETS`. The game loads
+them all behind a loading screen (`src/art.rs`).
+
+```sh
+./art/build.sh                     # rebuild everything (a few minutes on CPU)
+./art/build.sh wheel arena         # one asset, or a whole module
+ART_PREVIEW=/tmp/prev ./art/build.sh hammer   # also render a preview PNG
+```
+
+Natively, `SCRAP_SHOT=out.png` saves an offscreen frame and quits
+(`SCRAP_SHOT_DELAY`, `SCRAP_SHOT_SIZE=1600x900`, `SCRAP_CAM=x,y,z,tx,ty,tz`).
+
 ### Jump straight to a scene
 
 Append these query strings to the preview URL:
@@ -70,6 +87,7 @@ Append these query strings to the preview URL:
 - `?scene=fight&opp=2&test=1` — test fight against opponent index 2
 - `?scene=fight&opp=2&auto=1&test=1` — automated test fight
 - `?scene=scrap` — scrapheap
+- `?scene=lookdev` — every part on a turntable (`&yaw=&pitch=&dist=` also work in the workshop)
 
 The same options work natively as environment variables, for example
 `SCRAP_SCENE=fight SCRAP_OPP=2 SCRAP_TEST=1 cargo run --locked`.

@@ -19,6 +19,7 @@ use crate::params::param;
 use crate::parts::{Category, Design, PartKind};
 use crate::physics::{Phys, STEP};
 use crate::rng;
+use crate::art::Art;
 use crate::robot::{Ctx, Debris, DetachCtx, Ev, EyeMats, Input, PartOf, Robot, Spawn};
 use crate::scene::{self, SunOpts};
 use crate::state::{self, BattleResult, Run};
@@ -35,7 +36,6 @@ const MATCH_TIME: f32 = 120.0;
 const MAX_STEPS_PER_FRAME: f32 = 4.0;
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<EyeMats>();
     app.insert_resource(Time::<Fixed>::from_seconds(STEP as f64));
     app.add_systems(OnEnter(Screen::Fight), spawn_fight);
     app.add_systems(OnExit(Screen::Fight), end_fight);
@@ -134,6 +134,7 @@ fn spawn_fight(
     mut mats: ResMut<Assets<StandardMaterial>>,
     shared: Res<Mats>,
     eyes: Res<EyeMats>,
+    art: Res<Art>,
     s: Res<Run>,
     fonts: Res<Fonts>,
     mut virt: ResMut<Time<Virtual>>,
@@ -147,12 +148,12 @@ fn spawn_fight(
     scene::sun_lights(&mut commands, SunOpts { size: 14.0, dir: Vec3::new(-10.0, 9.0, -7.0), ..default() }, scope.clone());
     models::reseed(7);
     scene::sky_and_clouds(&mut commands, &mut meshes, &mut mats, Color::srgb_u8(0x4f, 0x9f, 0xe0), Color::srgb_u8(0xcf, 0xe9, 0xf7), 10, 60.0, scope.clone());
-    let info = arena::build_arena(&mut commands, &mut meshes, &mut mats, &shared, &mut phys, scope.clone());
+    let info = arena::build_arena(&mut commands, &mut meshes, &mut mats, &shared, &art, &mut phys, scope.clone());
     let fx = Fx::new(&mut commands, &mut meshes, &mut mats, arena::floor_y, scope.clone());
     commands.insert_resource(fx);
     let mut out = Outbox::default();
     let mut part_of = PartOf::new();
-    let mut sp = Spawn { commands: &mut commands, meshes: &mut meshes, shared: &shared, glow: &eyes, sfx: &mut out.sfx };
+    let mut sp = Spawn { commands: &mut commands, meshes: &mut meshes, glow: &eyes, art: &art, sfx: &mut out.sfx };
     let player = Robot::new(&mut sp, &mut phys, &mut part_of, &s.design, Vec3::new(0.0, 0.0, -6.0), 0.0, 0, scope.clone());
     let enemy_bot = Robot::new(&mut sp, &mut phys, &mut part_of, &enemy, Vec3::new(0.0, 0.0, 6.0), std::f32::consts::PI, 1, scope.clone());
     let hz = vec![Hazard { x: PIT.x, z: PIT.z, r: PIT.h }];
@@ -244,13 +245,12 @@ fn step_fight(
     mut commands: Commands,
     mut b: ResMut<Battle>,
     mut fx: ResMut<Fx>,
-    shared: Res<Mats>,
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     over_ui: Res<PointerOverUi>,
 ) {
     let pk = PlayerKeys::read(&keys, &mouse, !over_ui.0);
-    b.fixed_step(&mut commands, &shared, &mut fx, &pk);
+    b.fixed_step(&mut commands, &mut fx, &pk);
 }
 
 /// `?bench`: on top of the normal fixed steps, run the simulation flat out
@@ -330,7 +330,7 @@ fn flush_outbox(mut b: ResMut<Battle>, mut sfx: MessageWriter<Sfx>, mut pops: Me
 
 // ------------------------------------------------------------------ test drive
 /// The dummy is rebuilt in place a moment after it dies or falls out.
-fn respawn_dummy(mut commands: Commands, real: Res<Time<Real>>, mut b: ResMut<Battle>, mut meshes: ResMut<Assets<Mesh>>, shared: Res<Mats>, eyes: Res<EyeMats>) {
+fn respawn_dummy(mut commands: Commands, real: Res<Time<Real>>, mut b: ResMut<Battle>, mut meshes: ResMut<Assets<Mesh>>, eyes: Res<EyeMats>, art: Res<Art>) {
     if b.bots[1].alive && b.bots[1].pos.y >= -1.0 {
         return;
     }
@@ -341,7 +341,7 @@ fn respawn_dummy(mut commands: Commands, real: Res<Time<Real>>, mut b: ResMut<Ba
     b.respawn_t = 0.0;
     let Battle { phys, part_of, bots, enemy_design, out, .. } = &mut *b;
     bots[1].dispose(phys, part_of, &mut commands, &mut out.sfx);
-    let mut sp = Spawn { commands: &mut commands, meshes: &mut meshes, shared: &shared, glow: &eyes, sfx: &mut out.sfx };
+    let mut sp = Spawn { commands: &mut commands, meshes: &mut meshes, glow: &eyes, art: &art, sfx: &mut out.sfx };
     bots[1] = Robot::new(&mut sp, phys, part_of, enemy_design, Vec3::new(0.0, 0.0, 4.0), std::f32::consts::PI, 1, DespawnOnExit(Screen::Fight));
 }
 
@@ -418,10 +418,10 @@ fn sync_debris(real: Res<Time<Real>>, virt: Res<Time<Virtual>>, mut b: ResMut<Ba
 }
 
 /// The crowd bobs and the pit light pulses with the excitement.
-fn cheer_crowd(real: Res<Time<Real>>, mut b: ResMut<Battle>, mut meshes: ResMut<Assets<Mesh>>, mut crowd: Single<&mut Crowd>, mut pit: Single<&mut PointLight, With<PitLight>>) {
+fn cheer_crowd(real: Res<Time<Real>>, mut b: ResMut<Battle>, mut tfs: Query<&mut Transform>, crowd: Single<&Crowd>, mut pit: Single<&mut PointLight, With<PitLight>>) {
     b.excitement = (b.excitement - real.delta_secs().min(0.05) * 0.35).max(0.0);
     let exc = b.excitement + if b.phase == Phase::Over { 1.0 } else { 0.0 };
-    arena::update_arena(&mut meshes, &mut crowd, &mut pit, real.elapsed_secs(), exc);
+    arena::update_arena(&mut tfs, &crowd, &mut pit, real.elapsed_secs(), exc);
 }
 
 /// Frame both bots (favouring yours), pulling in as they close.
@@ -469,10 +469,10 @@ impl Battle {
     }
 
     /// Apply damage to a part (may knock it off or kill the bot).
-    fn damage(&mut self, commands: &mut Commands, shared: &Mats, fx: &mut Fx, (t, i): (usize, usize), dmg: f32, dir: Option<Vec3>) {
+    fn damage(&mut self, commands: &mut Commands, fx: &mut Fx, (t, i): (usize, usize), dmg: f32, dir: Option<Vec3>) {
         let mut detached = vec![];
         let Battle { phys, part_of, debris, bots, time, out, .. } = self;
-        let mut dc = DetachCtx { phys, part_of, fx, sfx: &mut out.sfx, commands, shared, debris, detached: &mut detached, hit_stop: 0.0, time: *time };
+        let mut dc = DetachCtx { phys, part_of, fx, sfx: &mut out.sfx, commands, debris, detached: &mut detached, hit_stop: 0.0, time: *time };
         bots[t].damage(&mut dc, i, dmg, dir);
         let hs = dc.hit_stop;
         self.hit_stop(hs);
@@ -487,12 +487,12 @@ impl Battle {
         }
     }
 
-    fn on_hit(&mut self, commands: &mut Commands, shared: &Mats, fx: &mut Fx, att: Option<usize>, tgt: (usize, usize), mut dmg: f32, pt: Vec3, big: bool, word: Option<&'static str>) {
+    fn on_hit(&mut self, commands: &mut Commands, fx: &mut Fx, att: Option<usize>, tgt: (usize, usize), mut dmg: f32, pt: Vec3, big: bool, word: Option<&'static str>) {
         if self.phase == Phase::Over && !self.test {
             dmg *= 0.3;
         }
         let dir = att.map(|a| (self.bots[tgt.0].pos - self.bots[a].pos).with_y(0.3).normalize_or_zero());
-        self.damage(commands, shared, fx, tgt, dmg, dir);
+        self.damage(commands, fx, tgt, dmg, dir);
         // the juice: chunks of the victim's paint and plate fly off, more for bigger hits
         if dmg > 3.0 {
             let n = ((2.0 + dmg * 0.45) as usize).min(26);
@@ -540,7 +540,7 @@ impl Battle {
         }
     }
 
-    fn fixed_step(&mut self, commands: &mut Commands, shared: &Mats, fx: &mut Fx, keys: &PlayerKeys) {
+    fn fixed_step(&mut self, commands: &mut Commands, fx: &mut Fx, keys: &PlayerKeys) {
         self.time += STEP;
         // input
         let fighting = self.phase == Phase::Fight;
@@ -581,11 +581,11 @@ impl Battle {
         for e in std::mem::take(&mut self.ev) {
             match e {
                 Ev::HitStop(s) => self.hit_stop(s),
-                Ev::Hit { att, tgt, dmg, pt, big, word } => self.on_hit(commands, shared, fx, att, tgt, dmg, pt, big, word),
+                Ev::Hit { att, tgt, dmg, pt, big, word } => self.on_hit(commands, fx, att, tgt, dmg, pt, big, word),
             }
         }
         for f in forces {
-            self.on_force(commands, shared, fx, f.collider1, f.collider2, f.total_force_magnitude);
+            self.on_force(commands, fx, f.collider1, f.collider2, f.total_force_magnitude);
         }
         self.pair_cd.retain(|_, v| {
             *v -= STEP;
@@ -597,7 +597,7 @@ impl Battle {
         }
     }
 
-    fn on_force(&mut self, commands: &mut Commands, shared: &Mats, fx: &mut Fx, h1: ColliderHandle, h2: ColliderHandle, f: f32) {
+    fn on_force(&mut self, commands: &mut Commands, fx: &mut Fx, h1: ColliderHandle, h2: ColliderHandle, f: f32) {
         let p1 = self.part_of.get(&h1).copied();
         let p2 = self.part_of.get(&h2).copied();
         // bot-vs-bot hits share one cooldown so a wide front can't multi-hit
@@ -649,8 +649,8 @@ impl Battle {
                 let (f12, f21) = (flank(self, p1.0, p2.0), flank(self, p2.0, p1.0));
                 let d12 = (base * mult(kind(self, p1))).max(s1) * resist(kind(self, p2)) * if f12 { 1.4 } else { 1.0 };
                 let d21 = (base * mult(kind(self, p2))).max(s2) * resist(kind(self, p1)) * if f21 { 1.4 } else { 1.0 };
-                self.on_hit(commands, shared, fx, Some(p1.0), p2, d12, mid, i > 0.55 && d12 >= d21, if f12 && d12 > 10.0 { Some("FLANKED!") } else { None });
-                self.on_hit(commands, shared, fx, Some(p2.0), p1, d21, mid, i > 0.55 && d21 > d12, if f21 && d21 > 10.0 { Some("FLANKED!") } else { None });
+                self.on_hit(commands, fx, Some(p1.0), p2, d12, mid, i > 0.55 && d12 >= d21, if f12 && d12 > 10.0 { Some("FLANKED!") } else { None });
+                self.on_hit(commands, fx, Some(p2.0), p1, d21, mid, i > 0.55 && d21 > d12, if f21 && d21 > 10.0 { Some("FLANKED!") } else { None });
                 let n = (b - a).normalize_or_zero();
                 fx.spark_burst(mid, (8.0 + 30.0 * i) as usize, Some(n.cross(Vec3::Y)), 6.0, 1.0);
                 fx.bolt_burst(mid, (i * 6.0) as usize, None);
@@ -678,7 +678,7 @@ impl Battle {
                     self.pair_cd.insert(key, 0.3);
                     let i = ((f - 4500.0) / 10000.0).min(1.0);
                     let pos = self.part_world_pos(p);
-                    self.damage(commands, shared, fx, p, 6.0 * i * resist(k), None);
+                    self.damage(commands, fx, p, 6.0 * i * resist(k), None);
                     fx.spark_burst(pos, (6.0 + 20.0 * i) as usize, None, 5.0, 1.0);
                     fx.dust(pos.with_y(0.1), 4);
                     self.out.sfx.push(Snd::Thud.at(0.25 + i * 0.6));
@@ -692,7 +692,7 @@ impl Battle {
                     let i = ((f - 5000.0) / 12000.0).min(1.0);
                     let pos = self.part_world_pos(p);
                     if i > 0.15 {
-                        self.damage(commands, shared, fx, p, 5.0 * i, None);
+                        self.damage(commands, fx, p, 5.0 * i, None);
                         fx.dust(pos.with_y(0.05), (4.0 + i * 10.0) as usize);
                         self.out.sfx.push(Snd::Thud.at(0.3 + i * 0.6));
                         fx.add_shake(0.1 + i * 0.4);

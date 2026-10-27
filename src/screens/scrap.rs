@@ -9,9 +9,11 @@
 use super::Screen;
 use crate::audio::{Sfx, Snd};
 use crate::fx::Fx;
-use crate::models::{self, bx, cbox, cbox_j, cyl, hexc, ico, rx, ry, tr, trr, Geo, Mats, Pal};
+use crate::models::{self, hexc, ico, rx, ry, tr, trr, Col, Geo, Pal};
 use crate::parts::{PartKind as K, Placed, Res as Stock};
-use crate::preview::part_geo;
+use crate::art::Art;
+use crate::preview::{part_look, spawn_static_part};
+use crate::robot::EyeMats;
 use crate::rng;
 use crate::scene::{self, SunOpts};
 use crate::state::{self, Run};
@@ -96,6 +98,8 @@ const CRANE: Vec3 = Vec3::new(12.0, 0.0, 7.0);
 const KENNEL: Vec3 = Vec3::new(-14.5, 0.0, 15.5);
 const CABIN: Vec3 = Vec3::new(-6.5, 0.0, -2.5);
 const SACK_MAX: usize = 6;
+/// the magnet's cable eye sits this far above its disc centre
+const MAGNET_EYE: f32 = 0.6;
 
 fn hex(h: &str) -> Color {
     Color::Srgba(Srgba::hex(h).unwrap())
@@ -292,7 +296,8 @@ fn ment(c: &mut Commands, meshes: &mut Assets<Mesh>, m: &Handle<StandardMaterial
 struct Loose<'w, 's> {
     commands: Commands<'w, 's>,
     meshes: ResMut<'w, Assets<Mesh>>,
-    shared: Res<'w, Mats>,
+    art: Res<'w, Art>,
+    eyes: Res<'w, EyeMats>,
     sfx: MessageWriter<'w, Sfx>,
     pops: MessageWriter<'w, PopWord>,
     toasts: MessageWriter<'w, Toast>,
@@ -300,21 +305,24 @@ struct Loose<'w, 's> {
 
 impl Loose<'_, '_> {
     fn drop(&mut self, loot: Loot, at: Vec3, to_player: bool) {
-        let g = match loot {
-            Loot::Plate => bx(0.6, 0.06, 0.5, Pal::steel(), 0.4, 0.0),
-            Loot::Bolts => {
-                let mut g = ico(0.22, hexc("#b89a6a"));
-                for _ in 0..4 {
-                    g.add(&cyl(0.05, 0.05, 0.08, 6, Pal::steel(), 0.0), tr(rng::signed() * 0.15, 0.2, rng::signed() * 0.15));
-                }
-                g
-            }
+        let key = match loot {
+            Loot::Plate => "plate.body",
+            Loot::Bolts => "bolts.body",
             Loot::Part(k) => {
                 let pl = Placed { id: 0, kind: k, parent: None, pos: Vec3::ZERO, rot: Quat::IDENTITY, dmg: 0.0, mirror: None };
-                part_geo(&pl, hexc("#c86a3a")).0.transformed(Transform::from_scale(Vec3::splat(0.9)))
+                let look = part_look(Color::srgb_u8(0xc8, 0x6a, 0x3a), &self.eyes);
+                let e = self.commands.spawn((Transform::from_translation(at), Visibility::default(), DespawnOnExit(Screen::Scrap))).id();
+                let part = spawn_static_part(&mut self.commands, &mut self.meshes, &self.art, &pl, &look, Transform::from_scale(Vec3::splat(0.9)), DespawnOnExit(Screen::Scrap));
+                self.commands.entity(e).add_child(part);
+                self.dropped(e, loot, at, to_player);
+                return;
             }
         };
-        let e = ment(&mut self.commands, &mut self.meshes, &self.shared.vc, &g, Transform::from_translation(at));
+        let e = put(&mut self.commands, &mut self.meshes, &self.art, key, Vec3::ONE, Transform::from_translation(at));
+        self.dropped(e, loot, at, to_player);
+    }
+
+    fn dropped(&mut self, e: Entity, loot: Loot, at: Vec3, to_player: bool) {
         let vel = if to_player { Vec3::new(rng::signed(), 6.0, rng::signed()) } else { Vec3::new(rng::signed() * 3.0, 5.0, rng::signed() * 3.0) };
         self.commands.entity(e).insert((Name::new(loot.name()), Drop { loot, vel, t: if to_player { 0.0 } else { -1.0 }, spilled: !to_player }));
         if to_player {
@@ -341,112 +349,96 @@ impl Loose<'_, '_> {
 }
 
 // ------------------------------------------------------------------ world
-fn junk(pick: f32) -> Geo {
-    let cars = ["#c86a3a", "#4a7aa8", "#7a8a4a", "#d8b03a"];
-    if pick < 0.14 {
-        return models::car_shell(hexc(wpick(&cars))).transformed(Transform::from_scale(Vec3::splat(0.45)));
-    }
-    if pick < 0.26 {
-        return models::washer();
-    }
-    if pick < 0.32 {
-        return models::fridge();
-    }
-    if pick < 0.44 {
-        return models::tyre_prop();
-    }
-    if pick < 0.54 {
-        return models::barrel(wpick(&[Pal::red(), Pal::teal(), Pal::yellow(), Pal::steel()]));
-    }
-    if pick < 0.6 {
-        return models::crate_prop();
-    }
-    if pick < 0.7 {
-        // engine block
-        let mut e = cbox(0.7, 0.45, 0.5, Pal::steel_dark(), 0.04, 0.35);
-        for k in 0..3 {
-            e.at(&cyl(0.08, 0.08, 0.15, 6, Pal::steel(), 0.2), -0.2 + k as f32 * 0.2, 0.28, 0.0);
-        }
-        e.at(&cbox(0.3, 0.3, 0.06, Pal::rust(), 0.02, 0.5), 0.38, 0.0, 0.0);
-        return e;
-    }
-    if pick < 0.8 {
-        return models::rod(Vec3::new(-0.7, 0.0, 0.0), Vec3::new(0.7, 0.1, 0.0), 0.07, wpick(&[Pal::steel(), Pal::rust(), hexc("#3f7fd8")]), 7, 0.4);
-    }
-    if pick < 0.9 {
-        return cbox(0.9, 0.05, 0.7, wpick(&[Pal::steel(), hexc("#d8453a"), hexc("#e8e0d0")]), 0.01, 0.5);
-    }
-    let mut g = Geo::new();
-    for sy in [-0.08, 0.08] {
-        g.at(&cbox(1.2, 0.04, 0.04, hexc("#d6a24a"), 0.01, 0.4), 0.0, sy, 0.0);
-    }
-    for k in 0..5 {
-        g.at(&cbox(0.03, 0.16, 0.03, hexc("#d6a24a"), 0.005, 0.4), -0.5 + k as f32 * 0.25, 0.0, 0.0);
-    }
-    g
+/// One Blender-made piece (art/props.py, art/yard.py): key, tint, transform.
+type Bit = (&'static str, Col, Transform);
+
+/// Spawn a piece at `t`, ignoring where it sat in its file.
+fn put(c: &mut Commands, meshes: &mut Assets<Mesh>, art: &Art, key: &str, tint: Col, t: Transform) -> Entity {
+    c.spawn((art.place(meshes, key, &[tint], t), DespawnOnExit(Screen::Scrap))).id()
 }
 
-/// Static scenery: one shadow-casting mesh plus a flat decal mesh. Returns obstacles.
-fn build_world(c: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>, shared: &Mats, obs: &mut Vec<(Vec3, f32)>) {
-    let mut stat = Geo::new();
-    let mut flat = Geo::new();
+fn put_all(c: &mut Commands, meshes: &mut Assets<Mesh>, art: &Art, bits: &[Bit], t: Transform) -> Vec<Entity> {
+    bits.iter().map(|(k, col, bt)| put(c, meshes, art, k, *col, t * *bt)).collect()
+}
+
+fn junk(pick: f32) -> Vec<Bit> {
+    let cars = ["#c86a3a", "#4a7aa8", "#7a8a4a", "#d8b03a"];
+    let one = |k: &'static str, col: Col, t: Transform| vec![(k, col, t)];
+    let id = Transform::IDENTITY;
+    if pick < 0.14 {
+        return one("car_shell.body", hexc(wpick(&cars)), Transform::from_scale(Vec3::splat(0.45)));
+    }
+    if pick < 0.26 {
+        return one("washer.body", Vec3::ONE, id);
+    }
+    if pick < 0.32 {
+        return one("fridge.body", Vec3::ONE, id);
+    }
+    if pick < 0.44 {
+        // standing on its tread
+        return one("tyre.body", Vec3::ONE, Transform::from_rotation(rx(PI / 2.0)));
+    }
+    if pick < 0.54 {
+        return one("barrel.body", wpick(&[Pal::red(), Pal::teal(), Pal::yellow(), Pal::steel()]), id);
+    }
+    if pick < 0.6 {
+        return one("crate.body", Vec3::ONE, id);
+    }
+    if pick < 0.7 {
+        return one("engine.body", Vec3::ONE, id);
+    }
+    if pick < 0.8 {
+        return one("pipe.body", Vec3::ONE, id);
+    }
+    if pick < 0.9 {
+        return one("sheet.body", wpick(&[Pal::steel(), hexc("#d8453a"), hexc("#e8e0d0")]), id);
+    }
+    one("girder_bit.body", Vec3::ONE, id)
+}
+
+/// Static scenery, instanced from Blender pieces. Returns obstacles.
+fn build_world(c: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>, art: &Art, obs: &mut Vec<(Vec3, f32)>) {
     let r = models::rand;
-    // concentric ground: concrete apron by the van, dirt further out
-    flat.add(&cyl(80.0, 80.0, 1.0, 24, hexc("#b98c58"), 0.02), tr(0.0, -0.5, 0.0));
-    for (rr, col) in [(RINGS[1], "#a97c4c"), (RINGS[0], "#c49866"), (5.5, "#a8a096")] {
-        // every flat decal gets its own height so none share a plane
-        let y = if rr < 6.0 { 0.012 } else if rr < RINGS[1] { 0.008 } else { 0.004 };
-        flat.add(&cyl(rr, rr, 0.004, 40, hexc(col), 0.03), tr(0.0, y, 0.0));
-    }
-    // gravel tracks radiating from the van
-    for i in 0..6 {
-        let a = i as f32 / 6.0 * TAU + 0.3;
-        flat.add(&bx(1.6, 0.004, YARD_R - 5.0, hexc("#9a8a74"), 0.0, 0.06), trr(a.sin() * (YARD_R / 2.0 + 2.5), 0.016 + i as f32 * 0.001, a.cos() * (YARD_R / 2.0 + 2.5), ry(a)));
-    }
-    // oil stains, puddles and dirt patches
-    for i in 0..90 {
-        let rad = 0.4 + r() * 1.8;
-        let k = r();
-        let col = if k < 0.2 { "#4a3e36" } else if k < 0.3 { "#6f8f9a" } else { "#b08254" };
-        let (a, d) = (r() * TAU, 3.0 + r() * (YARD_R - 3.0));
-        flat.add(&cyl(rad, rad, 0.004, 7, hexc(col), 0.0), tr(a.sin() * d, 0.024 + i as f32 * 0.0006, a.cos() * d));
-    }
+    // the ground: apron, dirt rings, tracks, stains and the drop mat are baked in
+    let g = put(c, meshes, art, "yard_ground.ground", Vec3::ONE, Transform::IDENTITY);
+    c.entity(g).insert(bevy::light::NotShadowCaster);
+    let g = put(c, meshes, art, "yard_outer.outer", Vec3::ONE, Transform::IDENTITY);
+    c.entity(g).insert(bevy::light::NotShadowCaster);
     // little bits of junk everywhere
     let bit_cols = [Pal::steel(), Pal::steel_dark(), Pal::rust(), Pal::tyre(), Pal::wood(), hexc("#d8453a"), hexc("#3f7fd8")];
     for _ in 0..260 {
         let (a, d) = (r() * TAU, 4.0 + r() * (YARD_R - 4.0));
         let k = r();
-        let o = if k < 0.35 {
-            cbox(0.3 + r() * 0.5, 0.04, 0.1 + r() * 0.3, wpick(&bit_cols), 0.01, 0.4)
+        let (key, scale, y) = if k < 0.35 {
+            ("bits.scrap_a", Vec3::new(0.6 + r(), 1.0, 0.4 + r() * 1.2), 0.03)
         } else if k < 0.55 {
-            models::rod(Vec3::ZERO, Vec3::new(0.6 + r(), 0.0, 0.0), 0.03, Pal::steel_dark(), 5, 0.4)
+            ("bits.scrap_b", Vec3::new(0.6 + r(), 1.0, 1.0), 0.03)
         } else if k < 0.7 {
-            cyl(0.06, 0.06, 0.05, 6, Pal::steel(), 0.2)
+            ("bits.nut", Vec3::ONE, 0.03)
         } else if k < 0.85 {
-            cbox(0.18, 0.12, 0.14, wpick(&bit_cols), 0.02, 0.3)
+            ("bits.can", Vec3::ONE, 0.05)
         } else {
-            models::tyre_prop().transformed(Transform { rotation: rx(PI / 2.0), scale: Vec3::splat(0.5), ..default() })
+            ("bits.small_tyre", Vec3::ONE, 0.1)
         };
-        flat.add(&o, trr(a.sin() * d, 0.06, a.cos() * d, ry(r() * 6.0)));
+        let e = put(c, meshes, art, key, wpick(&bit_cols), Transform { translation: Vec3::new(a.sin() * d, y, a.cos() * d), rotation: ry(r() * 6.0), scale });
+        c.entity(e).insert(bevy::light::NotShadowCaster);
     }
-    // round perimeter fence
+    // round perimeter fence: each panel runs from its post to the next
     let n_fence = 72;
     for i in 0..n_fence {
         let a0 = i as f32 / n_fence as f32 * TAU;
         let a1 = (i + 1) as f32 / n_fence as f32 * TAU;
         let p0 = Vec3::new(a0.sin(), 0.0, a0.cos()) * (YARD_R + 1.2);
         let p1 = Vec3::new(a1.sin(), 0.0, a1.cos()) * (YARD_R + 1.2);
-        stat.add(&bx(0.15, 2.4, 0.15, Pal::steel_dark(), 0.3, 0.0), Transform::from_translation(p0.with_y(1.2)));
-        let col = if r() < 0.5 { "#8a8f93" } else { "#7b6e60" };
-        let rot = ry((p1.x - p0.x).atan2(p1.z - p0.z) + PI / 2.0);
-        stat.add(&bx(p0.distance(p1), 2.0, 0.05, hexc(col), 0.45, 0.1), Transform { translation: p0.lerp(p1, 0.5).with_y(1.1), rotation: rot, ..default() });
+        let key = if r() < 0.5 { "fence.a" } else { "fence.b" };
+        put(c, meshes, art, key, Vec3::ONE, Transform::from_translation(p0).with_rotation(ry((p1.x - p0.x).atan2(p1.z - p0.z) - PI / 2.0)));
     }
     // distant junk mountains (no shadows)
     for i in 0..26 {
         let a = i as f32 / 26.0 * TAU;
         let d = 40.0 + r() * 8.0;
-        let col = if r() < 0.5 { "#8a6a52" } else { "#9a7a5a" };
-        flat.add(&ico(6.0 + r() * 6.0, hexc(col)), Transform { translation: Vec3::new(a.cos() * d, -1.0, a.sin() * d), scale: Vec3::new(1.0, 0.55, 1.0), ..default() });
+        let e = put(c, meshes, art, "mountain.body", Vec3::ONE, Transform { translation: Vec3::new(a.cos() * d, -1.0, a.sin() * d), rotation: ry(r() * 6.0), scale: Vec3::splat(6.0 + r() * 6.0) });
+        c.entity(e).insert(bevy::light::NotShadowCaster);
     }
     // ring walls of junk with gaps you walk through
     for (ri, rr) in RINGS.iter().enumerate() {
@@ -461,26 +453,20 @@ fn build_world(c: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut Assets<St
                 continue;
             }
             let k = r();
-            let j = if k < 0.45 {
-                models::car_shell(hexc(wpick(&["#c86a3a", "#4a7aa8", "#7a8a4a", "#a84a4a", "#d8b03a"])))
+            let j: Vec<Bit> = if k < 0.45 {
+                vec![("car_shell.body", hexc(wpick(&["#c86a3a", "#4a7aa8", "#7a8a4a", "#a84a4a", "#d8b03a"])), Transform::IDENTITY)]
             } else if k < 0.7 {
-                let mut g = Geo::new();
-                for h in 0..3 {
-                    g.add(&models::tyre_prop(), trr(0.0, 0.2 + h as f32 * 0.4, 0.0, rx(PI / 2.0)));
-                }
-                g.at(&models::barrel(wpick(&[Pal::red(), Pal::teal(), Pal::yellow()])), 1.0, 0.45, 0.3);
-                g
+                let mut v: Vec<Bit> = (0..3).map(|h| ("tyre.body", Vec3::ONE, tr(0.0, 0.2 + h as f32 * 0.4, 0.0).with_rotation(ry(h as f32 * 0.7)))).collect();
+                v.push(("barrel.body", wpick(&[Pal::red(), Pal::teal(), Pal::yellow()]), tr(1.0, 0.45, 0.3)));
+                v
             } else {
-                let mut g = Geo::new();
-                g.at(&models::fridge(), -0.5, 0.85, 0.0);
-                g.at(&models::washer(), 0.5, 0.45, 0.2);
-                g
+                vec![("fridge.body", Vec3::ONE, tr(-0.5, 0.85, 0.0)), ("washer.body", Vec3::ONE, tr(0.5, 0.45, 0.2))]
             };
             let mut rot = ry(a + PI / 2.0 + (r() - 0.5) * 0.6);
             if r() < 0.3 {
                 rot *= models::rz(0.15);
             }
-            stat.add(&j, Transform { translation: pos, rotation: rot, ..default() });
+            put_all(c, meshes, art, &j, Transform { translation: pos, rotation: rot, ..default() });
             obs.push((pos, 1.5));
         }
     }
@@ -493,7 +479,7 @@ fn build_world(c: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut Assets<St
         }
         for h in 0..4 + (r() * 3.0) as usize {
             let col = hexc(wpick(&["#c86a3a", "#4a7aa8", "#7a8a4a", "#a84a4a", "#d8b03a", "#e8e0d0"]));
-            stat.add(&cbox_j(3.2, 0.55, 1.6, col, 0.08, 0.45, 0.12), trr(pos.x, 0.28 + h as f32 * 0.56, pos.z, ry(a + (r() - 0.5) * 0.4)));
+            put(c, meshes, art, "car_stack.body", col, trr(pos.x, 0.28 + h as f32 * 0.56, pos.z, ry(a + (r() - 0.5) * 0.4)));
         }
         obs.push((pos, 1.8));
     }
@@ -501,129 +487,60 @@ fn build_world(c: &mut Commands, meshes: &mut Assets<Mesh>, mats: &mut Assets<St
     for (rr, col) in [(RINGS[0], "#7b4ea8"), (RINGS[1], "#c78a14")] {
         for a in [PI * 0.85, PI * 1.25, PI * 0.15] {
             let pos = Vec3::new(a.sin() * (rr - 0.6), 0.0, a.cos() * (rr - 0.6));
-            let mut g = Geo::new();
-            g.at(&bx(3.3, 0.7, 0.06, hexc(col), 0.2, 0.05), 0.0, 1.8, 0.0);
-            g.at(&bx(2.6, 0.12, 0.07, hexc("#fff3dc"), 0.0, 0.0), 0.0, 1.8, 0.0);
-            for dx in [-1.3, 1.3] {
-                g.at(&bx(0.12, 1.8, 0.12, Pal::steel_dark(), 0.4, 0.0), dx, 0.9, 0.0);
-            }
-            stat.add(&g, Transform { translation: pos, rotation: ry(a), ..default() });
+            put(c, meshes, art, "zone_board.body", hexc(col), Transform { translation: pos, rotation: ry(a), ..default() });
         }
     }
-    // the van in the middle
-    let mut van = Geo::new();
-    van.at(&cbox_j(2.4, 1.6, 4.6, hexc("#e8e0d0"), 0.12, 0.15, 0.06), 0.0, 1.2, 0.0);
-    van.at(&cbox_j(2.42, 0.5, 4.62, hexc("#3fa7a3"), 0.05, 0.1, 0.05), 0.0, 0.6, 0.0);
-    van.at(&cbox(2.2, 0.7, 1.2, hexc("#e8e0d0"), 0.1, 0.1), 0.0, 0.95, -2.7);
-    van.at(&bx(2.0, 0.55, 0.05, hexc("#7fb7c9"), 0.0, 0.0), 0.0, 1.75, -2.31);
-    van.at(&bx(2.2, 0.08, 3.6, Pal::steel_dark(), 0.3, 0.0), 0.0, 2.05, 0.2);
-    for sx in [-0.8, 0.0, 0.8] {
-        van.at(&bx(0.06, 0.25, 3.6, Pal::steel_dark(), 0.3, 0.0), sx, 2.15, 0.2);
-    }
-    van.at(&cbox(0.7, 0.4, 0.6, Pal::wood(), 0.03, 0.2), -0.5, 2.3, 0.8);
-    van.add(&models::tyre_prop(), Transform { translation: Vec3::new(0.5, 2.25, -0.4), rotation: rx(PI / 2.0), scale: Vec3::splat(0.8) });
-    // big red logo on the side
-    van.at(&cbox(0.06, 0.9, 1.2, hexc("#d8453a"), 0.02, 0.0), 1.22, 1.3, 0.4);
-    for sx in [-1.15, 1.15] {
-        for sz in [-1.8, 1.5] {
-            van.add(&cyl(0.42, 0.42, 0.3, 9, Pal::tyre(), 0.0), trr(sx, 0.42, sz, models::rz(PI / 2.0)));
-        }
-    }
-    stat.add(&van, trr(VAN_BODY.x, 0.0, VAN_BODY.z, ry(PI / 2.0)));
-    // hazard-striped drop mat
-    for i in 0..20 {
-        let (a0, a1) = (i as f32 / 20.0 * TAU, (i + 1) as f32 / 20.0 * TAU);
-        let col = if i % 2 == 0 { hexc("#3fa7a3") } else { hexc("#e8e0d0") };
-        for v in [Vec3::ZERO, Vec3::new(a0.sin(), 0.0, a0.cos()) * 2.4, Vec3::new(a1.sin(), 0.0, a1.cos()) * 2.4] {
-            flat.pos.push(VAN + v + Vec3::Y * 0.09);
-            flat.nrm.push(Vec3::Y);
-            flat.col.push(col);
-        }
-    }
+    // the van in the middle, the portacabin
+    put(c, meshes, art, "van.body", Vec3::ONE, trr(VAN_BODY.x, 0.0, VAN_BODY.z, ry(PI / 2.0)));
     obs.push((VAN_BODY + Vec3::new(-1.6, 0.0, 0.0), 1.4));
     obs.push((VAN_BODY, 1.4));
     obs.push((VAN_BODY + Vec3::new(1.8, 0.0, 0.0), 1.4));
-    // portacabin
-    let mut cabin = Geo::new();
-    cabin.at(&cbox_j(5.0, 2.6, 2.6, hexc("#d9b35a"), 0.06, 0.3, 0.06), 0.0, 1.5, 0.0);
-    cabin.at(&bx(1.2, 0.8, 0.05, hexc("#7fb7c9"), 0.0, 0.0), -1.2, 1.7, -1.31);
-    cabin.at(&bx(0.8, 1.8, 0.05, hexc("#7a4a2e"), 0.1, 0.0), 1.2, 1.1, -1.31);
-    cabin.at(&cbox(5.3, 0.15, 2.9, Pal::steel_dark(), 0.03, 0.4), 0.0, 2.85, 0.0);
-    stat.add(&cabin, trr(CABIN.x, 0.0, CABIN.z, ry(-0.5)));
+    put(c, meshes, art, "cabin.body", Vec3::ONE, trr(CABIN.x, 0.0, CABIN.z, ry(-0.5)));
     obs.push((CABIN + Vec3::new(-1.5, 0.0, 0.0), 1.6));
     obs.push((CABIN + Vec3::new(1.5, 0.0, 0.0), 1.6));
-    // lamp posts + bunting
+    // lamp posts + bunting strung from each to the next
     let lamp_mat = models::glow_mat(mats, hexc("#fff2c0"), 2.4);
-    let mut lamps = vec![];
-    let mut glow = Geo::new();
-    for i in 0..5 {
+    let lamps: Vec<Vec3> = (0..5).map(|i| {
         let a = i as f32 / 5.0 * TAU + 1.23; // none straight between camera and van
-        let pos = Vec3::new(a.sin() * 5.8, 0.0, a.cos() * 5.8);
-        lamps.push(pos);
+        Vec3::new(a.sin() * 5.8, 0.0, a.cos() * 5.8)
+    }).collect();
+    for (i, &pos) in lamps.iter().enumerate() {
         obs.push((pos, 0.3));
-        stat.add(&bx(0.15, 4.0, 0.15, Pal::steel_dark(), 0.2, 0.0), Transform::from_translation(pos.with_y(2.0)));
-        stat.add(&bx(0.6, 0.15, 0.3, Pal::ink(), 0.1, 0.0), Transform::from_translation(pos.with_y(4.0)));
-        glow.add(&bx(0.4, 0.06, 0.2, Vec3::ONE, 0.0, 0.0), Transform::from_translation(pos.with_y(3.92)));
+        put(c, meshes, art, "lamp_post.body", Vec3::ONE, Transform::from_translation(pos));
+        c.spawn((art.glow("lamp_post.glow_lamp", lamp_mat.clone(), Transform::from_translation(pos)), DespawnOnExit(Screen::Scrap)));
+        let next = lamps[(i + 1) % lamps.len()];
+        put(c, meshes, art, "bunting.body", Vec3::ONE, Transform::from_translation(pos).with_rotation(ry((next.x - pos.x).atan2(next.z - pos.z) - PI / 2.0)));
     }
-    let flag_cols = ["#d8453a", "#f2b632", "#3f7fd8", "#3fa7a3", "#e8e0d0"];
-    for i in 0..lamps.len() {
-        let (p0, p1) = (lamps[i].with_y(3.7), lamps[(i + 1) % lamps.len()].with_y(3.7));
-        stat.add0(&models::cable(&[p0, p0.lerp(p1, 0.5).with_y(3.1), p1], 0.012, hexc("#2a2830")));
-        for k in 1..9 {
-            let u = k as f32 / 9.0;
-            let q = p0.lerp(p1, u).with_y(3.7 - (u * PI).sin() * 0.6 - 0.12);
-            let rot = ry((p1.x - p0.x).atan2(p1.z - p0.z)) * rx(PI);
-            stat.add(&cyl(0.0, 0.12, 0.26, 3, hexc(flag_cols[k % 5]), 0.0), trr(q.x, q.y, q.z, rot));
-        }
-    }
-    ment(c, meshes, &lamp_mat, &glow, Transform::IDENTITY);
-    // kennel, door facing the van
-    let mut kennel = Geo::new();
-    kennel.at(&cbox_j(1.4, 1.0, 1.4, hexc("#a8763e"), 0.05, 0.1, 0.1), 0.0, 0.5, 0.0);
-    kennel.add(&cyl(0.0, 1.15, 0.7, 4, hexc("#a84a4a"), 0.2), trr(0.0, 1.35, 0.0, ry(PI / 4.0)));
-    kennel.at(&bx(0.6, 0.6, 0.05, Pal::ink(), 0.0, 0.0), 0.0, 0.35, -0.71);
-    kennel.at(&cyl(0.25, 0.2, 0.12, 8, Pal::red(), 0.1), 0.9, 0.06, -0.6);
-    stat.add(&kennel, trr(KENNEL.x, 0.0, KENNEL.z, ry(KENNEL.x.atan2(KENNEL.z))));
+    // kennel, door facing the van, and the "beware of the dog" board
+    put(c, meshes, art, "kennel.body", Vec3::ONE, trr(KENNEL.x, 0.0, KENNEL.z, ry(KENNEL.x.atan2(KENNEL.z))));
     obs.push((KENNEL, 1.0));
-    // "beware of the dog" board
     let wp = (KENNEL * 0.9).lerp(Vec3::ZERO, 0.25);
-    stat.add(&cbox(1.2, 0.5, 0.05, Pal::yellow(), 0.01, 0.2), trr(wp.x, 1.2, wp.z, ry(wp.x.atan2(wp.z))));
-    stat.add(&bx(0.08, 1.2, 0.08, Pal::steel_dark(), 0.3, 0.0), Transform::from_translation(wp.with_y(0.6)));
-
-    ment(c, meshes, &shared.vc, &stat, Transform::IDENTITY);
-    let f = ment(c, meshes, &shared.vc, &flat, Transform::IDENTITY);
-    c.entity(f).insert(bevy::light::NotShadowCaster);
+    put(c, meshes, art, "warning_sign.body", Vec3::ONE, trr(wp.x, 0.0, wp.z, ry(wp.x.atan2(wp.z))));
 }
 
-fn add_pile(c: &mut Commands, meshes: &mut Assets<Mesh>, shared: &Mats, pm: &PileMats, p: Vec3, r: f32, zone: usize) {
-    let mut g = Geo::new();
+fn add_pile(c: &mut Commands, meshes: &mut Assets<Mesh>, art: &Art, pm: &PileMats, p: Vec3, r: f32, zone: usize) {
     let dirt = hexc(["#9a8060", "#8a6a4a", "#7e5236"][zone]);
-    // lumpy mound from a few overlapping rocks
-    for i in 0..3 {
-        let a = models::rand() * TAU;
-        let off = if i > 0 { Vec3::new(a.cos() * r * 0.5, -0.1, a.sin() * r * 0.5) } else { Vec3::new(0.0, -0.1, 0.0) };
-        let lump = ico(r * if i > 0 { 0.6 } else { 1.0 }, dirt);
-        g.add(&lump, Transform { translation: off, rotation: ry(models::rand() * 6.0), scale: Vec3::new(1.0, 0.42 + zone as f32 * 0.1, 1.0) });
-    }
+    let root = c.spawn((Transform::from_translation(p), Visibility::default(), DespawnOnExit(Screen::Scrap))).id();
+    let mut kids = vec![put(c, meshes, art, "mound.body", dirt, Transform { rotation: ry(models::rand() * 6.0), scale: Vec3::new(r, r * (1.0 + 0.22 * zone as f32), r), ..default() })];
     for _ in 0..5 + zone * 3 {
         let o = junk(models::rand());
         let a = models::rand() * TAU;
         let d = models::rand().sqrt() * r * 0.7;
         let rot = Quat::from_euler(EulerRot::XYZ, (models::rand() - 0.5) * 1.2, models::rand() * 6.0, (models::rand() - 0.5) * 1.2);
         let y = r * (0.22 + zone as f32 * 0.05) * (1.0 - d / r) + 0.15;
-        g.add(&o, Transform { translation: Vec3::new(a.cos() * d, y, a.sin() * d), rotation: rot, scale: Vec3::splat(0.8 + models::rand() * 0.4) });
+        kids.extend(put_all(c, meshes, art, &o, Transform { translation: Vec3::new(a.cos() * d, y, a.sin() * d), rotation: rot, scale: Vec3::splat(0.8 + models::rand() * 0.4) }));
     }
     if zone == 2 {
         // a tatty tarp half-covering the good stuff
         let rot = Quat::from_euler(EulerRot::XYZ, 0.25, models::rand() * 6.0, -0.3);
-        g.add(&cbox_j(r * 1.1, 0.04, r * 0.9, hexc("#3f6fb0"), 0.02, 0.1, 0.12), trr(r * 0.2, r * 0.35, 0.0, rot));
+        kids.push(put(c, meshes, art, "tarp.body", hexc("#3f6fb0"), Transform { translation: Vec3::new(r * 0.2, r * 0.35, 0.0), rotation: rot, scale: Vec3::splat(r) }));
     }
+    c.entity(root).add_children(&kids);
     // quality ring on the ground, readable from a distance
     let ring = ment(c, meshes, &pm.ring[zone], &ring_geo(r + 0.15, r + 0.35, 24), Transform::from_translation(p + Vec3::Y * 0.09));
     c.entity(ring).insert(bevy::light::NotShadowCaster);
     let glint = ment(c, meshes, &pm.glint[zone], &ico(0.16 + zone as f32 * 0.04, Vec3::ONE), Transform::from_xyz(p.x, 1.4 + zone as f32 * 0.35, p.z));
     c.entity(glint).insert((Glint { zone }, bevy::light::NotShadowCaster));
-    let root = ment(c, meshes, &shared.vc, &g, Transform::from_translation(p));
     c.entity(root).insert((Name::new(PILE_NAMES[zone]), Pile { r, zone, dug: false, glint, ring }));
 }
 
@@ -633,7 +550,7 @@ fn spawn_yard(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
-    shared: Res<Mats>,
+    art: Res<Art>,
     fonts: Res<Fonts>,
     s: Res<Run>,
     mut toasts: MessageWriter<Toast>,
@@ -645,7 +562,7 @@ fn spawn_yard(
     scene::sun_lights(c, SunOpts { size: 14.0, dir: SUN_DIR, sun: hex("#ffd49a"), intensity: 1.1, sky: hex("#94baf2"), ground: hex("#c08a52") }, scope.clone());
     scene::sky_and_clouds(c, m, &mut mats, hex("#5b9fe0"), hex("#ffe2b8"), 12, 70.0, scope.clone());
     let mut obstacles = vec![];
-    build_world(c, m, &mut mats, &shared, &mut obstacles);
+    build_world(c, m, &mut mats, &art, &mut obstacles);
 
     let pm = PileMats {
         ring: [0, 1, 2].map(|z| mats.add(StandardMaterial { base_color: hex(ZONE_HEX[z]).with_alpha(if z > 0 { 0.7 } else { 0.35 }), unlit: true, alpha_mode: AlphaMode::Blend, cull_mode: None, ..default() })),
@@ -668,101 +585,52 @@ fn spawn_yard(
             if piles.iter().any(|(q, qr)| q.distance(p) < qr + r + 1.6) || obstacles.iter().any(|(q, qr)| q.distance(p) < qr + r + 0.6) {
                 continue;
             }
-            add_pile(c, m, &shared, &pm, p, r, tier);
+            add_pile(c, m, &art, &pm, p, r, tier);
             piles.push((p, r));
             made += 1;
         }
     }
 
     // the scavenger: overalls, welding mask up, sack on the back
-    let over = hexc("#3f6fb0");
-    let mut bg = Geo::new();
-    bg.at(&bx(0.5, 0.55, 0.32, over, 0.0, 0.08), 0.0, 0.85, 0.0);
-    bg.at(&bx(0.52, 0.12, 0.34, hexc("#ee7a32"), 0.0, 0.05), 0.0, 1.0, 0.0);
-    bg.at(&bx(0.34, 0.32, 0.32, hexc("#f1c7a1"), 0.0, 0.06), 0.0, 1.32, 0.0);
-    bg.add(&bx(0.38, 0.3, 0.1, hexc("#2e2d33"), 0.0, 0.05), trr(0.0, 1.5, 0.12, rx(-0.9)));
-    bg.at(&bx(0.4, 0.08, 0.36, hexc("#f2b632"), 0.0, 0.05), 0.0, 1.5, -0.02);
-    for sx in [-0.07, 0.07] {
-        bg.at(&bx(0.05, 0.07, 0.02, Pal::ink(), 0.0, 0.0), sx, 1.33, 0.165);
-    }
     let start = Vec3::new(0.0, 0.0, -2.6);
     let player = c.spawn((Name::new("Scavenger"), Scavenger { vel: Vec3::ZERO, heading: 0.0, step_t: 0.0, stun: 0.0 }, Transform::from_translation(start), Visibility::default(), scope.clone())).id();
-    let body = ment(c, m, &shared.vc, &bg, Transform::IDENTITY);
+    let body = put(c, m, &art, "scavenger.body", Vec3::ONE, Transform::IDENTITY);
     c.entity(body).insert(Rig::Body);
     c.entity(player).add_child(body);
-    let mut lg = Geo::new();
-    lg.at(&bx(0.18, 0.5, 0.2, over, 0.0, 0.08), 0.0, -0.25, 0.0);
-    lg.at(&bx(0.2, 0.12, 0.3, hexc("#4a3a2e"), 0.0, 0.05), 0.0, -0.52, 0.05);
-    let mut ag = Geo::new();
-    ag.at(&bx(0.14, 0.45, 0.16, over, 0.0, 0.08), 0.0, -0.2, 0.0);
-    ag.at(&bx(0.15, 0.13, 0.17, hexc("#e8a63a"), 0.0, 0.05), 0.0, -0.45, 0.0);
     for (i, sx) in [-0.13, 0.13].into_iter().enumerate() {
-        let e = ment(c, m, &shared.vc, &lg, tr(sx, 0.6, 0.0));
+        let e = put(c, m, &art, "scavenger.leg", Vec3::ONE, tr(sx, 0.6, 0.0));
         c.entity(e).insert((Rig::Leg(i), ChildOf(body)));
     }
     for (i, sx) in [-0.33, 0.33].into_iter().enumerate() {
-        let e = ment(c, m, &shared.vc, &ag, tr(sx, 1.08, 0.0));
+        let e = put(c, m, &art, "scavenger.arm", Vec3::ONE, tr(sx, 1.08, 0.0));
         c.entity(e).insert((Rig::Arm(i), ChildOf(body)));
     }
-    let sack = ment(c, m, &shared.vc, &ico(0.3, hexc("#b89a6a")), tr(0.0, 1.0, -0.32));
+    let sack = put(c, m, &art, "scavenger.sack", Vec3::ONE, tr(0.0, 1.0, -0.32));
     c.entity(sack).insert((Rig::Sack, ChildOf(body)));
 
     // the yard dog
-    let fur = hexc("#7a5a3a");
-    let mut dg = Geo::new();
-    dg.at(&bx(0.45, 0.4, 0.9, fur, 0.05, 0.1), 0.0, 0.55, 0.0);
-    let hd = Vec3::new(0.0, 0.85, 0.5);
-    dg.at(&bx(0.36, 0.34, 0.36, fur, 0.05, 0.1), hd.x, hd.y, hd.z);
-    dg.at(&bx(0.22, 0.18, 0.22, hexc("#c8a27a"), 0.0, 0.05), 0.0, hd.y - 0.06, hd.z + 0.24);
-    dg.at(&bx(0.1, 0.08, 0.06, Pal::ink(), 0.0, 0.0), 0.0, hd.y, hd.z + 0.36);
-    for sx in [-0.12, 0.12] {
-        dg.at(&bx(0.08, 0.2, 0.06, hexc("#5a3a22"), 0.0, 0.05), sx, hd.y + 0.22, hd.z - 0.05);
-    }
-    dg.at(&bx(0.4, 0.08, 0.4, Pal::red(), 0.0, 0.05), 0.0, hd.y - 0.2, hd.z - 0.05);
-    dg.add(&bx(0.08, 0.08, 0.35, fur, 0.0, 0.0), trr(0.0, 0.8, -0.55, rx(0.7)));
     let dog_home = KENNEL * 0.9;
-    let dog = ment(c, m, &shared.vc, &dg, Transform::from_translation(dog_home).with_rotation(ry(PI)));
+    let dog = put(c, m, &art, "dog.body", Vec3::ONE, Transform::from_translation(dog_home).with_rotation(ry(PI)));
     c.entity(dog).insert((Name::new("Dog"), Dog { mood: DogMood::Sleep, t: 0.0, bark: 0.0, home: dog_home }));
     let eye_mat = models::glow_mat(&mut mats, hexc("#ffe14a"), 2.4);
-    let mut eg = Geo::new();
-    for sx in [-0.12, 0.12] {
-        eg.at(&bx(0.06, 0.06, 0.02, Vec3::ONE, 0.0, 0.0), sx * 0.8, hd.y + 0.06, hd.z + 0.185);
+    for g in ["dog.glow_eye_l", "dog.glow_eye_r"] {
+        let e = c.spawn(art.glow(g, eye_mat.clone(), Transform::IDENTITY)).id();
+        c.entity(e).insert(ChildOf(dog));
     }
-    let eyes = ment(c, m, &eye_mat, &eg, Transform::IDENTITY);
-    c.entity(eyes).insert(ChildOf(dog));
-    let mut dl = Geo::new();
-    dl.at(&bx(0.12, 0.4, 0.12, fur, 0.0, 0.0), 0.0, -0.2, 0.0);
     for (i, (sx, sz)) in [(-0.15, 0.3), (0.15, 0.3), (-0.15, -0.3), (0.15, -0.3)].into_iter().enumerate() {
-        let e = ment(c, m, &shared.vc, &dl, tr(sx, 0.4, sz));
+        let e = put(c, m, &art, "dog.leg", Vec3::ONE, tr(sx, 0.4, sz));
         c.entity(e).insert((DogLeg(i), ChildOf(dog)));
     }
 
-    // the crane: tracks, a turning cab and a lattice boom with a magnet
-    let yel = hexc("#f2b632");
-    ment(c, m, &shared.vc, &bx(3.0, 0.8, 3.4, Pal::ink(), 0.1, 0.0), Transform::from_translation(CRANE + Vec3::Y * 0.4));
-    let mut top = Geo::new();
-    top.at(&bx(2.4, 1.6, 2.6, yel, 0.25, 0.08), 0.0, 1.6, -0.3);
-    top.at(&bx(1.2, 1.0, 1.0, hexc("#7fb7c9"), 0.05, 0.0), 0.5, 2.6, 0.6);
-    let mut boom = Geo::new();
-    for i in 0..9 {
-        let z = i as f32 * 1.1 + 0.6;
-        for sx in [-0.3, 0.3] {
-            for sy in [-0.3, 0.3] {
-                boom.at(&bx(0.08, 0.08, 1.2, yel, 0.3, 0.0), sx, sy, z);
-            }
-            boom.add(&bx(0.06, 0.8, 0.06, yel, 0.3, 0.0), trr(sx, 0.0, z, rx(0.7)));
-        }
-    }
-    top.add(&boom, trr(0.0, 2.4, 0.6, rx(-0.45)));
+    // the crane: tracks, a turning cab with its lattice boom, a magnet on a cable
+    put(c, m, &art, "crane.base", Vec3::ONE, Transform::from_translation(CRANE));
     let magnet_pos = CRANE + Vec3::new(0.0, 6.5, 10.0);
-    let crane = ment(c, m, &shared.vc, &top, Transform::from_translation(CRANE));
+    let crane = put(c, m, &art, "crane.cab", Vec3::ONE, Transform::from_translation(CRANE + Vec3::Y * 0.8));
     c.entity(crane).insert((Name::new("Crane"), Crane { t: 8.0, target: None, yaw: 0.0, magnet_pos, carry: None }));
     obstacles.push((CRANE, 2.2));
-    let mut mg = cyl(0.9, 0.9, 0.35, 12, Pal::steel_dark(), 0.3);
-    mg.at(&cyl(0.2, 0.2, 0.3, 6, Pal::red(), 0.1), 0.0, 0.3, 0.0);
-    let magnet = ment(c, m, &shared.vc, &mg, Transform::from_translation(magnet_pos));
+    let magnet = put(c, m, &art, "crane.magnet", Vec3::ONE, Transform::from_translation(magnet_pos + Vec3::Y * MAGNET_EYE));
     c.entity(magnet).insert(Magnet);
-    let cable = ment(c, m, &shared.vc, &cyl(0.03, 0.03, 1.0, 4, hexc("#2a2830"), 0.0), Transform::IDENTITY);
+    let cable = put(c, m, &art, "crane.cable", Vec3::ONE, Transform::IDENTITY);
     c.entity(cable).insert(Cable);
     let warn_mat = mats.add(StandardMaterial { base_color: Color::srgba(1.0, 0.23, 0.1, 0.45), unlit: true, alpha_mode: AlphaMode::Blend, cull_mode: None, ..default() });
     let warn = ment(c, m, &warn_mat, &ring_geo(1.2, 1.6, 24), Transform::IDENTITY);
@@ -1141,7 +1009,7 @@ fn swing_crane(
     yard: Res<Yard>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
-    shared: Res<Mats>,
+    art: Res<Art>,
     player: Single<(Entity, &Scavenger)>,
     crane: Single<(Entity, &mut Crane)>,
     magnet: Single<Entity, With<Magnet>>,
@@ -1165,7 +1033,7 @@ fn swing_crane(
     let dir = Vec3::new(cr.yaw.sin(), 0.0, cr.yaw.cos());
     cr.magnet_pos = cr.magnet_pos.lerp((CRANE + dir * reach).with_y(6.5), ease(dt, 3.0));
     let tip = CRANE + ry(cr.yaw) * Vec3::new(0.0, 2.4 + 0.45f32.sin() * 10.0, 0.6 + 0.45f32.cos() * 10.0);
-    let v = tip - cr.magnet_pos;
+    let v = tip - (cr.magnet_pos + Vec3::Y * MAGNET_EYE);
     let mut set = |e: Entity, f: &dyn Fn(&mut Transform)| {
         if let Ok(mut tf) = tfs.get_mut(e) {
             f(&mut tf);
@@ -1173,12 +1041,13 @@ fn swing_crane(
     };
     let (yaw, magnet_pos) = (cr.yaw, cr.magnet_pos);
     set(ce, &|tf| tf.rotation = ry(yaw));
-    set(*magnet, &|tf| tf.translation = magnet_pos);
-    set(*cable, &|tf| *tf = Transform { translation: magnet_pos.lerp(tip, 0.5), rotation: Quat::from_rotation_arc(Vec3::Y, v.normalize_or(Vec3::Y)), scale: Vec3::new(1.0, v.length(), 1.0) });
+    set(*magnet, &|tf| tf.translation = magnet_pos + Vec3::Y * MAGNET_EYE);
+    // the cable hangs down -Y from the boom tip to the magnet's eye
+    set(*cable, &|tf| *tf = Transform { translation: tip, rotation: Quat::from_rotation_arc(Vec3::Y, v.normalize_or(Vec3::Y)), scale: Vec3::new(1.0, v.length(), 1.0) });
     let dropping = !falling.is_empty();
     if cr.carry.is_none() && !dropping {
-        let g = models::car_shell(hexc(rng::pick(&["#c86a3a", "#4a7aa8", "#7a8a4a", "#d8b03a"])));
-        cr.carry = Some(ment(&mut commands, &mut meshes, &shared.vc, &g, Transform::from_scale(Vec3::splat(0.6))));
+        let col = hexc(rng::pick(&["#c86a3a", "#4a7aa8", "#7a8a4a", "#d8b03a"]));
+        cr.carry = Some(put(&mut commands, &mut meshes, &art, "car_shell.body", col, Transform::from_scale(Vec3::splat(0.6))));
     }
     if let Some(e) = cr.carry {
         set(e, &|tf| {
@@ -1264,8 +1133,8 @@ fn drop_car(
     loose.commands.entity(e).despawn();
     if yard.crane_piles < 3 {
         yard.crane_piles += 1;
-        let Loose { commands, meshes, shared, .. } = &mut loose;
-        add_pile(commands, meshes, shared, &pm, fp, 1.2, 0);
+        let Loose { commands, meshes, art, .. } = &mut loose;
+        add_pile(commands, meshes, art, &pm, fp, 1.2, 0);
     }
 }
 

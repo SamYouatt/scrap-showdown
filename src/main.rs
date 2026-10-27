@@ -6,6 +6,7 @@
 //! shared UI widgets and overlays live in `theme/`.
 mod ai;
 mod arena;
+mod art;
 mod audio;
 mod fx;
 mod models;
@@ -18,6 +19,8 @@ mod rng;
 mod robot;
 mod scene;
 mod screens;
+#[cfg(not(target_arch = "wasm32"))]
+mod shot;
 mod state;
 mod theme;
 
@@ -45,12 +48,15 @@ impl Plugin for AppPlugin {
                         canvas: Some("#view".into()),
                         fit_canvas_to_parent: true,
                         prevent_default_event_handling: true,
+                        resolution: (1600, 900).into(),
                         ..default()
                     }),
                     ..default()
                 }),
         );
         app.insert_resource(ClearColor(Color::srgb_u8(0x8f, 0xc8, 0xef)));
-        app.add_plugins((audio::plugin, fx::plugin, models::plugin, scene::plugin, state::plugin, theme::plugin, screens::plugin));
+        #[cfg(not(target_arch = "wasm32"))]
+        app.add_plugins(shot::plugin);
+        app.add_plugins((art::plugin, audio::plugin, fx::plugin, models::plugin, scene::plugin, state::plugin, theme::plugin, screens::plugin));
     }
 }

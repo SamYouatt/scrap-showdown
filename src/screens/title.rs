@@ -23,7 +23,7 @@ fn bot_yaw(i: f32) -> f32 {
     PI + (i - 1.0) * -0.5
 }
 
-fn spawn_title(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>, shared: Res<Mats>, fonts: Res<Fonts>) {
+fn spawn_title(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>, shared: Res<Mats>, art: Res<crate::art::Art>, eyes: Res<crate::robot::EyeMats>, fonts: Res<Fonts>) {
     let scope = DespawnOnExit(Screen::Title);
     models::reseed(3);
     scene::sun_lights(&mut commands, SunOpts { size: 6.0, dir: Vec3::new(4.0, 8.0, -6.0), ..default() }, scope.clone());
@@ -35,7 +35,7 @@ fn spawn_title(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mat
         let x = (i as f32 - 1.0) * 2.6;
         let z = if i == 1 { -0.6 } else { 0.4 };
         let tf = Transform::from_xyz(x, 0.0, z).with_rotation(Quat::from_rotation_y(bot_yaw(i as f32)));
-        let e = spawn_preview(&mut commands, &mut meshes, &mut mats, &shared, &opps[idx].design, false, tf, scope.clone());
+        let e = spawn_preview(&mut commands, &mut meshes, &art, &eyes, &opps[idx].design, false, tf, scope.clone());
         commands.entity(e).insert(TitleBot(i));
     }
     commands.spawn((scene::camera_bundle(36.0, Transform::from_xyz(0.0, 3.4, -9.5).looking_at(Vec3::new(0.0, 0.9, 0.0), Vec3::Y)), TitleCam, scope.clone()));

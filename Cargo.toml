@@ -4,11 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = { version = "0.20", features = ["wav"] }
+bevy = { version = "0.20", features = ["wav", "jpeg"] }
 rapier3d = "0.36"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-bevy = { version = "0.20", features = ["webgl2", "wav", "debug"] }
+bevy = { version = "0.20", features = ["webgl2", "wav", "jpeg", "debug"] }
 getrandom = { version = "0.3", features = ["wasm_js"] }
 web-sys = { version = "0.3", features = [
     "Window",

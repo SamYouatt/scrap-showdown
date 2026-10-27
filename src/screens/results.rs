@@ -35,6 +35,8 @@ fn spawn_results(
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
     shared: Res<Mats>,
+    art: Res<crate::art::Art>,
+    eyes: Res<crate::robot::EyeMats>,
     fonts: Res<Fonts>,
     mut s: ResMut<Run>,
     mut next: ResMut<NextState<Screen>>,
@@ -66,7 +68,7 @@ fn spawn_results(
     scene::sky_and_clouds(&mut commands, &mut meshes, &mut mats, Color::srgb_u8(0x3f, 0x93, 0xe6), Color::srgb_u8(0xb8, 0xdc, 0xf6), 8, 30.0, scope.clone());
     let ground = models::cyl(3.2, 3.2, 0.4, 10, models::hexc("#c79a62"), 0.0);
     commands.spawn((Name::new("Plinth"), Mesh3d(meshes.add(ground.to_mesh())), MeshMaterial3d(shared.vc.clone()), Transform::from_xyz(-2.6, -0.2, 0.0), scope.clone()));
-    let e = spawn_preview(&mut commands, &mut meshes, &mut mats, &shared, &s.design, false, Transform::from_xyz(-2.6, 0.0, 0.0), scope.clone());
+    let e = spawn_preview(&mut commands, &mut meshes, &art, &eyes, &s.design, false, Transform::from_xyz(-2.6, 0.0, 0.0), scope.clone());
     commands.entity(e).insert(Spin);
     commands.spawn((scene::camera_bundle(36.0, Transform::from_xyz(0.0, 2.8, -8.0).looking_at(Vec3::new(0.0, 0.8, 0.0), Vec3::Y)), scope.clone()));
 
