@@ -22,6 +22,8 @@ if [[ ! -x "$HOME/.cargo/bin/rustup" ]]; then
   curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain none
 fi
 source "$HOME/.cargo/env"
+# Each game pins its own toolchain; run Cargo/rustup from inside the game folder.
+cd scrapheap-rumble
 rustup show active-toolchain
 
 # Use release binaries rather than compiling the development tools in every orb.

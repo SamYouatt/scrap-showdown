@@ -1,6 +1,6 @@
 services:
   game:
-    command: ./dev-web.sh
+    command: ./scrapheap-rumble/dev-web.sh
     health: /index.html
     portal:
       title: Scrapheap Rumble
