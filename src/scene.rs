@@ -139,6 +139,14 @@ pub(super) fn plugin(app: &mut App) {
     app.insert_resource(DirectionalLightShadowMap { size: 2048 });
     app.insert_resource(LowQuality(crate::params::param("q").as_deref() == Some("low")));
     app.add_systems(PostUpdate, apply_low_quality.run_if(|q: Res<LowQuality>| q.0));
+    app.add_observer(fog_everywhere);
+}
+
+/// Every camera gets distance fog (past the far plane where a screen doesn't
+/// set its own): fog is a shader define, so mixing fogged and unfogged
+/// cameras would compile every pipeline twice.
+fn fog_everywhere(add: On<Add<Camera3d>>, mut commands: Commands) {
+    commands.entity(add.entity).insert_if_new(DistanceFog { falloff: FogFalloff::Linear { start: 1000.0, end: 2000.0 }, ..default() });
 }
 
 /// `?q=low`: no MSAA, bloom or shadows (slow GPUs, software GL).

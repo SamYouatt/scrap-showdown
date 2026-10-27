@@ -141,8 +141,11 @@ impl Pool {
                 nrm = vec![[0.0, 1.0, 0.0]; 3];
                 col = vec![[0.0; 4]; 3];
             }
+            let n = pos.len();
             m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
             m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, nrm);
+            // same vertex layout as everything else (see models::uniform_layout)
+            m.insert_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0f32; 2]; n]);
             m.insert_attribute(Mesh::ATTRIBUTE_COLOR, col);
         }
     }
@@ -176,6 +179,7 @@ impl Fx {
             let mesh = meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
                 .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0f32, -100.0, 0.0]; 3])
                 .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0f32, 1.0, 0.0]; 3])
+                .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0f32; 2]; 3])
                 .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, vec![[0.0f32; 4]; 3]));
             let mut e = commands.spawn((Name::new("Particles"), Mesh3d(mesh.clone()), MeshMaterial3d(mats.add(mat)), Transform::IDENTITY, bevy::camera::visibility::NoFrustumCulling, scope.clone()));
             if !shadows {
