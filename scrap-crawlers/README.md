@@ -27,6 +27,23 @@ panel on the right edits the creature live.
 URL options: `?seed=N` (random creature), `?debug=1`, `?wander=0`, `?pixel=1..6`,
 `?outlines=0`, `?shadows=0`, `?palette=1` (dither).
 
+### Headless testing (agents, CI)
+
+Headless Chrome has no GPU in an orb, so by default WebGPU finds no adapter, or
+the device is lost as soon as it presents. Software WebGPU (SwiftShader) runs at
+about 30–50 fps with these flags:
+
+```sh
+export AGENT_BROWSER_ARGS="--enable-unsafe-webgpu,--enable-features=Vulkan,--use-vulkan=swiftshader,--use-webgpu-adapter=swiftshader,--ignore-gpu-blocklist,--enable-gpu-compositing,--use-angle=vulkan"
+agent-browser open "http://127.0.0.1:<port>/?seed=5&wander=0"
+```
+
+Get `<port>` from `amp orb service status crawlers`. Use `127.0.0.1` rather than
+`localhost`, because WebGPU needs a secure context.
+Flags only apply when the browser launches, so run `agent-browser close --all`
+first. The HUD in the bottom-left shows the frame rate and adapter name, which
+helps confirm WebGPU is running.
+
 ## How it works
 
 **Procedural movement** (`src/creature.ts`, `src/ik.ts`)

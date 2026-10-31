@@ -15,6 +15,7 @@ services:
   crawlers:
     command: pnpm install --frozen-lockfile && exec pnpm exec vite --port "$PORT"
     cwd: scrap-crawlers
+    health: /
     portal:
       title: Scrap Crawlers
       description: WebGPU procedural-walker prototype. Needs a WebGPU browser (recent Chrome/Edge/Safari). Vite hot-reloads edits.
