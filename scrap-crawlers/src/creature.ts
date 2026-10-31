@@ -9,10 +9,11 @@ import { DrawList, Mat } from './render/drawlist';
 import { Prim } from './render/mesh';
 import {
   Frame, Quat, Rng, V3, add, addScaled, clamp, copy, cross, damp, dist, distXZ, dot, hex, len, lerp, mix,
-  norm, qAlongY, qAxisAngle, qIdentity, qLook, qRotate, rng, scale, smoothstep, sub, toWorld, wrapAngle,
+  norm, qAxisAngle, qIdentity, qLook, qRotate, rng, scale, smoothstep, sub, toWorld, wrapAngle,
 } from './math';
 import { bentChain, fabrik } from './ik';
-import { World } from './world';
+import { Dims, Toolkit, Tools } from './tools';
+import { Terrain } from './world';
 
 export type Gait = 'trot' | 'creep' | 'scurry';
 export type LegStyle = 'pipe' | 'girder' | 'piston';
@@ -37,15 +38,24 @@ export interface Design {
   gait: Gait;
   tail: number;
   antennae: number;
-  head: HeadStyle;
+  /** The control module. Null leaves the front-top mount empty. */
+  head: HeadStyle | null;
+  /** Tools on the hull's tool mounts. */
+  tools: Tools;
+  /** Bolt seeded random scrap onto the hull. Off keeps the hull clear for mounted parts. */
+  junk: boolean;
 }
 
 export const defaultDesign = (): Design => ({
   seed: 7, palette: 0, hull: 'crate', bodyLength: 1.3, bodyWidth: 0.8,
   legPairs: 3, legSegments: 3, legLength: 1.1, legSpread: 1, legStyle: 'pipe',
   rideHeight: 0.45, stepHeight: 0.3, stepSpeed: 1, walkSpeed: 1.6, gait: 'trot',
-  tail: 6, antennae: 2, head: 'can',
+  tail: 6, antennae: 2, head: 'can', tools: {}, junk: true,
 });
+
+export function hullDims(d: Design): Dims {
+  return { L: d.bodyLength, W: d.bodyWidth, H: d.bodyWidth * (d.hull === 'pod' ? 0.7 : 0.55) };
+}
 
 export function randomDesign(seed: number): Design {
   const r = rng(seed);
@@ -58,11 +68,11 @@ export function randomDesign(seed: number): Design {
     rideHeight: round(r.range(0.25, 0.7), 0.05), stepHeight: round(r.range(0.15, 0.5), 0.05),
     stepSpeed: round(r.range(0.7, 1.6), 0.05), walkSpeed: round(r.range(1, 2.4), 0.1),
     gait: r.pick(['trot', 'creep', 'scurry'] as const), tail: r.int(0, 10), antennae: r.int(0, 2),
-    head: r.pick(['can', 'tv', 'lamp'] as const),
+    head: r.pick(['can', 'tv', 'lamp'] as const), tools: {}, junk: true,
   };
 }
 
-interface Palette {
+export interface Palette {
   name: string;
   main: V3;
   second: V3;
@@ -136,6 +146,7 @@ export class Creature {
   private readonly hs: number;
   private readonly th: number;
   private readonly parts: Part[];
+  readonly toolkit: Toolkit;
   private up: V3 = [0, 1, 0];
   private bodyY: number;
   private bodyVy = 0;
@@ -147,14 +158,16 @@ export class Creature {
   private dust: Dust[] = [];
   private blink = 0;
 
-  constructor(design: Design, private world: World, pos: V3, yaw = 0) {
+  constructor(design: Design, private world: Terrain, pos: V3, yaw = 0) {
     this.design = design;
     this.pal = PALETTES[design.palette % PALETTES.length];
     this.pos = [pos[0], 0, pos[2]];
     this.yaw = yaw;
-    this.L = design.bodyLength;
-    this.W = design.bodyWidth;
-    this.H = design.bodyWidth * (design.hull === 'pod' ? 0.7 : 0.55);
+    const dims = hullDims(design);
+    this.L = dims.L;
+    this.W = dims.W;
+    this.H = dims.H;
+    this.toolkit = new Toolkit(design.tools, dims, world);
     this.hs = 0.26 + this.W * 0.14;
     this.th = 0.07 * Math.sqrt(design.legLength) + 0.025;
     this.stride = Math.max(0.25, design.legLength * 0.42 * design.legSpread);
@@ -221,6 +234,7 @@ export class Creature {
     this.updateTail(dt, time);
     this.updateAntennae(dt);
     this.updateDust(dt);
+    this.toolkit.update(dt, time, this.frame);
   }
 
   private move(dt: number) {
@@ -259,9 +273,9 @@ export class Creature {
     const d = this.design;
     let sum = 0;
     for (const l of this.legs) sum += l.stepping ? mix(l.from[1], l.desired[1], 0.5) : l.foot[1];
-    const feetY = sum / this.legs.length;
     const floor = this.world.heightAt(this.pos[0], this.pos[2]) + this.H * 0.5 + 0.06;
-    const targetY = Math.max(feetY + d.rideHeight * d.legLength + this.H * 0.3, floor);
+    // Without legs the hull just rests on the floor.
+    const targetY = this.legs.length ? Math.max(sum / this.legs.length + d.rideHeight * d.legLength + this.H * 0.3, floor) : floor;
     // Critically-ish damped spring: footfalls kick it, so the body bobs.
     this.bodyVy += ((targetY - this.bodyY) * 70 - this.bodyVy * 13) * dt;
     this.bodyY += this.bodyVy * dt;
@@ -279,7 +293,7 @@ export class Creature {
     const sideH: V3 = [Math.cos(this.yaw), 0, -Math.sin(this.yaw)];
     const fv = d.legPairs > 1 ? norm(sub(avg((l) => l.pair === 0), avg((l) => l.pair === d.legPairs - 1)), fwdH) : fwdH;
     const sv = norm(sub(avg((l) => l.side > 0), avg((l) => l.side < 0)), sideH);
-    let upT = norm(cross(fv, sv));
+    let upT: V3 = this.legs.length ? norm(cross(fv, sv)) : UP;
     if (upT[1] < 0) upT = scale(upT, -1);
     upT = norm(lerp(upT, UP, 0.45));
     // Lean a little into turns.
@@ -450,11 +464,12 @@ export class Creature {
     for (const part of this.parts) list.addLocal(this.frame, part.prim, part.p, part.q, part.s, part.col, part.mat);
     this.drawLegs(list);
     this.drawHead(list);
+    this.toolkit.draw(list, this.frame, P);
 
     for (let k = 1; k < this.tail.length; k++) {
       const a = this.tail[k - 1], b = this.tail[k];
       const r = mix(0.13, 0.05, k / this.tail.length) * (0.6 + this.W * 0.5);
-      seg(list, Prim.Cyl, a, b, [r, 1.1, r], k % 2 ? P.second : P.dark, qRotate(this.frame.q, [1, 0, 0]));
+      list.seg(Prim.Cyl, a, b, [r, 1.1, r], k % 2 ? P.second : P.dark, qRotate(this.frame.q, [1, 0, 0]));
       list.add(Prim.Sphere, b, qIdentity(), [r * 1.15, r * 1.15, r * 1.15], k % 2 ? P.dark : P.main);
     }
     if (this.tail.length > 1) {
@@ -463,7 +478,7 @@ export class Creature {
     }
 
     for (const a of this.antennae) {
-      for (let k = 1; k < a.pts.length; k++) seg(list, Prim.Box, a.pts[k - 1], a.pts[k], [0.025, 1, 0.025], P.dark, [1, 0, 0]);
+      for (let k = 1; k < a.pts.length; k++) list.seg(Prim.Box, a.pts[k - 1], a.pts[k], [0.025, 1, 0.025], P.dark, [1, 0, 0]);
       list.add(Prim.Sphere, a.pts[a.pts.length - 1], qIdentity(), [0.07, 0.07, 0.07], P.glow, Mat.Emissive);
     }
 
@@ -484,13 +499,13 @@ export class Creature {
         const taper = 1 - (i - 1) / l.joints.length * 0.35;
         const t = th * taper;
         if (this.design.legStyle === 'pipe') {
-          seg(list, Prim.Cyl, a, b, [t, 1, t], P.second, out);
+          list.seg(Prim.Cyl, a, b, [t, 1, t], P.second, out);
         } else if (this.design.legStyle === 'girder') {
-          seg(list, Prim.Box, a, b, [t * 1.1, 1, t * 1.7], P.main, out);
-          seg(list, Prim.Box, a, b, [t * 0.45, 0.85, t * 1.9], P.dark, out);
+          list.seg(Prim.Box, a, b, [t * 1.1, 1, t * 1.7], P.main, out);
+          list.seg(Prim.Box, a, b, [t * 0.45, 0.85, t * 1.9], P.dark, out);
         } else {
-          seg(list, Prim.Cyl, a, lerp(a, b, 0.6), [t * 1.6, 1, t * 1.6], P.main, out);
-          seg(list, Prim.Cyl, a, b, [t * 0.8, 1, t * 0.8], P.second, out);
+          list.seg(Prim.Cyl, a, lerp(a, b, 0.6), [t * 1.6, 1, t * 1.6], P.main, out);
+          list.seg(Prim.Cyl, a, b, [t * 0.8, 1, t * 0.8], P.second, out);
         }
         if (i < l.joints.length - 1) list.add(Prim.Sphere, b, qIdentity(), [t * 1.7, t * 1.7, t * 1.7], P.dark);
       }
@@ -501,12 +516,13 @@ export class Creature {
   }
 
   private drawHead(list: DrawList) {
+    if (!this.design.head) return;
     const P = this.pal, hs = this.hs;
     const hf = this.headFrame();
     // Springy neck: a few coils between the chassis and the bobbing head.
     const anchor = toWorld(this.frame, [0, this.H * 0.4, this.L / 2 - 0.05]);
     for (let i = 0; i < 4; i++) {
-      seg(list, Prim.Cyl, lerp(anchor, hf.p, i / 4), lerp(anchor, hf.p, (i + 1) / 4), [0.12 + (i % 2) * 0.04, 0.7, 0.12 + (i % 2) * 0.04], i % 2 ? P.dark : P.second, [1, 0, 0]);
+      list.seg(Prim.Cyl, lerp(anchor, hf.p, i / 4), lerp(anchor, hf.p, (i + 1) / 4), [0.12 + (i % 2) * 0.04, 0.7, 0.12 + (i % 2) * 0.04], i % 2 ? P.dark : P.second, [1, 0, 0]);
     }
     const lens = (z: number, d: number) => {
       list.addLocal(hf, Prim.Cyl, [0, 0, z - 0.02], X_TO_Z, [d * 1.3, 0.05, d * 1.3], P.dark);
@@ -531,14 +547,6 @@ export class Creature {
   }
 }
 
-/** A primitive stretched between two points (unit length along local Y). */
-function seg(list: DrawList, prim: Prim, a: V3, b: V3, s: V3, col: V3, side: V3, mat?: Mat) {
-  const d = sub(b, a);
-  const l = len(d);
-  if (l < 1e-4) return;
-  list.add(prim, lerp(a, b, 0.5), qAlongY(d, side), [s[0], s[1] * l, s[2]], col, mat);
-}
-
 /** Bolts random scrap onto a hull. The seed decides the junk; the sliders decide the size. */
 function buildChassis(d: Design, r: Rng, P: Palette, L: number, W: number, H: number): Part[] {
   const parts: Part[] = [];
@@ -554,6 +562,13 @@ function buildChassis(d: Design, r: Rng, P: Palette, L: number, W: number, H: nu
     add_(Prim.Cyl, [0, -H * 0.1, 0], [W * 1.06, 0.08, L * 1.06], P.dark);
   }
   const top = d.hull === 'drum' ? H * 0.6 : d.hull === 'pod' ? H * 0.62 : H / 2;
+  if (!d.junk) {
+    // A clean hull: just rivets along the top edges, clear of the mounts.
+    for (const z of [-0.42, -0.14, 0.14, 0.42]) {
+      for (const s of [-1, 1]) add_(Prim.Sphere, [s * W * 0.43, top, z * L], [0.05, 0.05, 0.05], P.dark);
+    }
+    return parts;
+  }
 
   // Junk on top. Each piece is optional so every seed looks a little different.
   if (r.chance(0.7)) {

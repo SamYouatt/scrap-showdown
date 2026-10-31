@@ -1,5 +1,5 @@
 // Per-frame list of primitive instances, grouped by primitive for instanced draws.
-import { Frame, Quat, V3, add, qMul, qRotate } from '../math';
+import { Frame, Quat, V3, add, len, lerp, qAlongY, qMul, qRotate, sub } from '../math';
 import { PRIM_COUNT, Prim } from './mesh';
 
 export const INSTANCE_FLOATS = 16;
@@ -25,6 +25,14 @@ export class DrawList {
   /** Adds a primitive placed in a parent frame's local space. */
   addLocal(f: Frame, prim: Prim, p: V3, q: Quat, s: V3, col: V3, mat: Mat = Mat.Lit) {
     this.add(prim, add(f.p, qRotate(f.q, p)), qMul(f.q, q), s, col, mat);
+  }
+
+  /** A primitive stretched between two points (unit length along local Y). */
+  seg(prim: Prim, a: V3, b: V3, s: V3, col: V3, side: V3, mat?: Mat) {
+    const d = sub(b, a);
+    const l = len(d);
+    if (l < 1e-4) return;
+    this.add(prim, lerp(a, b, 0.5), qAlongY(d, side), [s[0], s[1] * l, s[2]], col, mat);
   }
 
   /** Packs every instance into one array and reports the [first, count] range per primitive. */

@@ -27,6 +27,19 @@ panel on the right edits the creature live.
 URL options: `?seed=N` (random creature), `?debug=1`, `?wander=0`, `?pixel=1..6`,
 `?outlines=0`, `?shadows=0`, `?palette=1` (dither).
 
+### Workshop
+
+`/workshop.html` is where you build a crawler. Pick a body (only the box hull
+for now), then drag parts from the bin onto the yellow mount rings: leg kits on
+the sides, a control module on the front top, and tools on the front face,
+spine or back top. The pincer needs a pneumatics tank (nested under it in the
+bin) before it works. Drag a fitted part off to remove it. Left- or right-drag
+orbits the camera and the wheel zooms. The build is kept in the URL, for example
+`?build=box;legs=crab;head=tv;front=pincer;spine=pneumatics`.
+
+Mount points and tools live in `src/tools.ts`, the parts catalogue in
+`src/parts.ts`, and the room in `src/room.ts`.
+
 ### Headless testing (agents, CI)
 
 Headless Chrome has no GPU in an orb, so by default WebGPU finds no adapter, or

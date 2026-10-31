@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Scrap Crawlers · Workshop</title>
+    <style>
+      :root {
+        --ink: #f2e6cf;
+        --dim: #b7a98f;
+        --panel: rgba(32, 27, 26, 0.92);
+        --card: #2b2422;
+        --edge: #5a4a3c;
+        --hi: #e0a040;
+        --mount: #ffd23a;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #222; color: var(--ink);
+        font: 13px/1.35 ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace; user-select: none; }
+      /* The 3D view starts right of the parts bin so the build sits centred in the open space. */
+      canvas { position: absolute; top: 0; bottom: 0; left: 314px; right: 0; width: calc(100% - 314px); height: 100%;
+        display: block; touch-action: none; }
+      #overlay { pointer-events: none; }
+      .panel { position: absolute; top: 12px; bottom: 12px; overflow-y: auto; background: var(--panel);
+        border: 2px solid var(--edge); box-shadow: 4px 4px 0 rgba(0,0,0,.35); padding: 10px 12px; }
+      #bin { left: 12px; width: 290px; }
+      #sheet { right: 12px; width: 250px; bottom: auto; max-height: calc(100% - 24px); }
+      h1 { margin: 0 0 2px; font-size: 16px; letter-spacing: 1px; color: var(--hi); text-transform: uppercase; }
+      .sub { color: var(--dim); margin-bottom: 6px; }
+      .sub a { color: var(--dim); }
+      h2 { margin: 12px 0 6px; font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 2px;
+        border-bottom: 1px dashed var(--edge); padding-bottom: 2px; }
+      .card { position: relative; background: var(--card); border: 2px solid var(--edge); padding: 6px 8px; margin: 0 0 6px;
+        cursor: grab; box-shadow: 2px 2px 0 rgba(0,0,0,.4); }
+      .card:hover { border-color: var(--hi); }
+      .card .name { color: var(--ink); }
+      .card .blurb { color: var(--dim); font-size: 11.5px; margin: 2px 0 4px; }
+      .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+      .chips span { font-size: 10.5px; padding: 0 4px; border: 1px solid var(--edge); color: var(--dim); }
+      .chips span.slot { border-color: #8a6a1c; color: var(--mount); }
+      .chips span.needs { border-color: #8a3b2c; color: #ff8a6a; }
+      .card.fitted::after { content: 'FITTED'; position: absolute; top: 5px; right: 6px; font-size: 10px; color: #1d1918;
+        background: var(--mount); padding: 0 4px; }
+      .card.body { cursor: pointer; }
+      .card.body.chosen { border-color: var(--mount); }
+      .card.locked { opacity: .4; cursor: not-allowed; }
+      .card.locked:hover { border-color: var(--edge); }
+      .card.soon::after { content: 'NOT YET'; position: absolute; top: 5px; right: 6px; font-size: 10px; color: var(--dim);
+        border: 1px solid var(--edge); padding: 0 4px; }
+      .nested { margin-left: 18px; }
+      .nested::before { content: ''; position: absolute; left: -14px; top: -8px; width: 10px; height: 26px;
+        border-left: 2px solid var(--edge); border-bottom: 2px solid var(--edge); }
+      .card.wanted { animation: want 0.9s steps(2) infinite; }
+      @keyframes want { 50% { border-color: var(--mount); } }
+      .row { display: grid; grid-template-columns: 82px 1fr 18px; gap: 6px; align-items: center; padding: 3px 0;
+        border-bottom: 1px dotted #3d332c; }
+      .row .slot { color: var(--dim); }
+      .row .empty { color: #6f6253; }
+      .row button { padding: 0 4px; box-shadow: none; border-width: 1px; }
+      .warn { color: #ff8a6a; font-size: 11.5px; margin: 6px 0 0; }
+      .ok { color: #9cff57; font-size: 11.5px; margin: 6px 0 0; }
+      .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
+      button { background: #3b302b; color: var(--ink); border: 2px solid var(--edge); font: inherit; padding: 5px 6px; cursor: pointer;
+        box-shadow: 2px 2px 0 rgba(0,0,0,.4); }
+      button:hover { border-color: var(--hi); }
+      #ghost { position: fixed; pointer-events: none; display: none; z-index: 10; transform: translate(14px, 10px);
+        background: var(--card); border: 2px solid var(--mount); padding: 3px 8px; box-shadow: 3px 3px 0 rgba(0,0,0,.45); }
+      #ghost.snapped { border-color: #fff6c0; color: #fff6c0; }
+      #prompt { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); pointer-events: none; text-align: center;
+        background: var(--panel); border: 2px solid var(--edge); padding: 8px 14px; box-shadow: 4px 4px 0 rgba(0,0,0,.35); }
+      #prompt b { color: var(--mount); font-weight: normal; }
+      #hud { position: absolute; left: 320px; bottom: 12px; background: var(--panel); border: 2px solid var(--edge); padding: 6px 10px;
+        color: var(--dim); white-space: pre; pointer-events: none; }
+      #hud b { color: var(--ink); font-weight: normal; }
+      #nogpu { position: absolute; inset: 0; display: none; place-items: center; text-align: center; padding: 40px; background: #1d1918; }
+      #nogpu div { max-width: 520px; }
+    </style>
+  </head>
+  <body>
+    <canvas id="gpu"></canvas>
+    <canvas id="overlay"></canvas>
+    <div id="bin" class="panel">
+      <h1>Workshop</h1>
+      <div class="sub">drag parts onto the mounts · <a href="./">walker bench</a></div>
+      <div id="parts"></div>
+    </div>
+    <div id="sheet" class="panel"></div>
+    <div id="prompt"></div>
+    <div id="ghost"></div>
+    <div id="hud"></div>
+    <div id="nogpu"><div><h1>WebGPU unavailable</h1><p id="nogpu-msg"></p>
+      <p>Try a recent Chrome, Edge or Safari, or Firefox Nightly with WebGPU enabled.</p></div></div>
+    <script type="module" src="/src/workshop.ts"></script>
+  </body>
+</html>

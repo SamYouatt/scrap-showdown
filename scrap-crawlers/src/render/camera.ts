@@ -13,8 +13,8 @@ export class Camera {
   /** 30° elevation gives the classic 2:1 pixel-art dimetric slope. */
   pitch = (30 * Math.PI) / 180;
   target: V3 = [0, 0, 0];
-  /** CSS pixels per world unit. Fixed: zooming would change the pixel density. */
-  readonly zoom = 80;
+  /** CSS pixels per world unit. Changing it changes how much detail each texel covers. */
+  zoom = 80;
 
   // Derived each frame by update().
   right: V3 = [1, 0, 0];

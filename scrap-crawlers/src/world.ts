@@ -4,6 +4,12 @@ import { DrawList, Mat } from './render/drawlist';
 import { MeshBuilder, Prim } from './render/mesh';
 import { Quat, Rng, V3, add, fbm, hex, mix, qAxisAngle, qIdentity, qMul, rng, valueNoise } from './math';
 
+/** What creatures need from the ground they stand on. */
+export interface Terrain {
+  readonly half: number;
+  heightAt(x: number, z: number): number;
+}
+
 interface Obstacle {
   kind: 'crate' | 'drum' | 'tyre';
   x: number;
@@ -31,7 +37,7 @@ const RUST = hex('#8f5634');
 const MOSS = hex('#6a7444');
 const SAND = hex('#a08b62');
 
-export class World {
+export class World implements Terrain {
   readonly half = 32;
   readonly obstacles: Obstacle[] = [];
   private debris: Debris[] = [];

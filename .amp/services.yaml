@@ -20,5 +20,7 @@ services:
       title: Scrap Crawlers
       description: WebGPU procedural-walker prototype. Needs a WebGPU browser (recent Chrome/Edge/Safari). Vite hot-reloads edits.
     portals:
+      - url: /workshop.html
+        title: Scrap Crawlers workshop
       - url: /?debug=1
         title: Scrap Crawlers (IK debug)
