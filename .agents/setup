@@ -59,4 +59,8 @@ fi
 
 echo "Fetching locked dependencies (compilation happens when developing)"
 cargo fetch --locked --target "$(rustc -vV | sed -n 's/^host: //p')" --target wasm32-unknown-unknown
+cd ..
+
+echo "Installing Scrap Crawlers dependencies"
+(cd scrap-crawlers && pnpm install --frozen-lockfile)
 echo "Ready: amp orb services ensure"

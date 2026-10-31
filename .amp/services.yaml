@@ -12,3 +12,12 @@ services:
         title: Test fight
       - url: /?scene=lookdev&spin=1
         title: Art look-dev
+  crawlers:
+    command: pnpm install --frozen-lockfile && exec pnpm exec vite --port "$PORT"
+    cwd: scrap-crawlers
+    portal:
+      title: Scrap Crawlers
+      description: WebGPU procedural-walker prototype. Needs a WebGPU browser (recent Chrome/Edge/Safari). Vite hot-reloads edits.
+    portals:
+      - url: /?debug=1
+        title: Scrap Crawlers (IK debug)
