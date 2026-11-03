@@ -9,7 +9,7 @@ import { V3, add, clamp, damp, mix, norm, qAxisAngle, qIdentity, rng, scale, wra
 const params = new URLSearchParams(location.search);
 const canvas = document.getElementById('gpu') as HTMLCanvasElement;
 const overlay = document.getElementById('overlay') as HTMLCanvasElement;
-const hud = document.getElementById('hud') as HTMLDivElement;
+const hud = document.querySelector('#hud > div') as HTMLDivElement;
 
 interface Settings extends RenderOptions {
   pixelSize: number;
@@ -109,9 +109,9 @@ function buildControls() {
     if (c.kind === 'range') {
       const obj = (c.target === 'design' ? design : settings) as unknown as Record<string, number>;
       const input = Object.assign(document.createElement('input'), { type: 'range', min: c.min, max: c.max, step: c.step, value: obj[c.key] });
-      const v = Object.assign(document.createElement('span'), { className: 'v', textContent: String(obj[c.key]) });
+      const v = Object.assign(document.createElement('span'), { className: 'v', textContent: String(+obj[c.key].toFixed(2)) });
       input.addEventListener('input', () => {
-        v.textContent = input.value;
+        v.textContent = String(+Number(input.value).toFixed(2));
         if (c.target === 'design') rebuild({ ...design, [c.key]: Number(input.value) });
         else (settings as unknown as Record<string, number>)[c.key] = Number(input.value);
       });

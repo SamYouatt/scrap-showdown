@@ -35,10 +35,23 @@ the sides, a control module on the front top, and tools on the front face,
 spine or back top. The pincer needs a pneumatics tank (nested under it in the
 bin) before it works. Drag a fitted part off to remove it. Left- or right-drag
 orbits the camera and the wheel zooms. The build is kept in the URL, for example
-`?build=box;legs=crab;head=tv;front=pincer;spine=pneumatics`.
+`?build=box;legs=crab;fronttop=tv;front=pincer;spine=pneumatics`.
+
+Control modules and pincers fit any non-leg mount and face the way that mount
+faces, so a pincer on the back top reaches backwards.
 
 Mount points and tools live in `src/tools.ts`, the parts catalogue in
 `src/parts.ts`, and the room in `src/room.ts`.
+
+### Arena
+
+`/arena.html` is an auto-battle spike. **Fight!** on the workshop's build sheet
+sends your build in against a rival (`?a=<build>&rival=N`). Without a build, it
+shows two rivals fighting. Each fighter picks a plan from its parts: a wedge
+rams, a powered pincer grabs, holds, squeezes and flings, and anything else just
+bumps. It turns so its weapon, not necessarily its nose, faces the opponent. You
+win by knockout or by ring-out off the platform. The rules are in
+`src/battle.ts` and the pit is in `src/pit.ts`.
 
 ### Headless testing (agents, CI)
 

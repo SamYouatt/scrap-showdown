@@ -22,5 +22,7 @@ services:
     portals:
       - url: /workshop.html
         title: Scrap Crawlers workshop
+      - url: /arena.html
+        title: Scrap Crawlers arena
       - url: /?debug=1
         title: Scrap Crawlers (IK debug)

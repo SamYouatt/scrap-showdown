@@ -4,90 +4,69 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Scrap Crawlers · Workshop</title>
+    <link rel="stylesheet" href="./src/ui.css" />
     <style>
-      :root {
-        --ink: #f2e6cf;
-        --dim: #b7a98f;
-        --panel: rgba(32, 27, 26, 0.92);
-        --card: #2b2422;
-        --edge: #5a4a3c;
-        --hi: #e0a040;
-        --mount: #ffd23a;
-      }
-      * { box-sizing: border-box; }
-      html, body { margin: 0; height: 100%; overflow: hidden; background: #222; color: var(--ink);
-        font: 13px/1.35 ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace; user-select: none; }
       /* The 3D view starts right of the parts bin so the build sits centred in the open space. */
-      canvas { position: absolute; top: 0; bottom: 0; left: 314px; right: 0; width: calc(100% - 314px); height: 100%;
-        display: block; touch-action: none; }
-      #overlay { pointer-events: none; }
-      .panel { position: absolute; top: 12px; bottom: 12px; overflow-y: auto; background: var(--panel);
-        border: 2px solid var(--edge); box-shadow: 4px 4px 0 rgba(0,0,0,.35); padding: 10px 12px; }
-      #bin { left: 12px; width: 290px; }
-      #sheet { right: 12px; width: 250px; bottom: auto; max-height: calc(100% - 24px); }
-      h1 { margin: 0 0 2px; font-size: 16px; letter-spacing: 1px; color: var(--hi); text-transform: uppercase; }
-      .sub { color: var(--dim); margin-bottom: 6px; }
-      .sub a { color: var(--dim); }
-      h2 { margin: 12px 0 6px; font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 2px;
-        border-bottom: 1px dashed var(--edge); padding-bottom: 2px; }
-      .card { position: relative; background: var(--card); border: 2px solid var(--edge); padding: 6px 8px; margin: 0 0 6px;
-        cursor: grab; box-shadow: 2px 2px 0 rgba(0,0,0,.4); }
-      .card:hover { border-color: var(--hi); }
-      .card .name { color: var(--ink); }
-      .card .blurb { color: var(--dim); font-size: 11.5px; margin: 2px 0 4px; }
+      canvas { left: 318px; width: calc(100% - 318px); }
+      #bin { top: 10px; left: 10px; bottom: 10px; width: 298px; }
+      #sheetwin { top: 10px; right: 10px; width: 268px; max-height: calc(100% - 20px); }
+      .card { position: relative; display: grid; grid-template-columns: 72px 1fr; gap: 8px; align-items: center;
+        margin: 0 0 6px; padding: 4px 8px 4px 4px; cursor: grab; background: var(--face-hi); border: 2px solid;
+        border-color: var(--bevel-hi) var(--bevel-lo) var(--bevel-lo) var(--bevel-hi); }
+      .card:hover { box-shadow: inset 0 0 0 2px var(--orange); }
+      .card .name { font-weight: bold; margin-bottom: 4px; padding-right: 54px; }
+      .card .thumb { display: block; image-rendering: pixelated; }
       .chips { display: flex; flex-wrap: wrap; gap: 4px; }
-      .chips span { font-size: 10.5px; padding: 0 4px; border: 1px solid var(--edge); color: var(--dim); }
-      .chips span.slot { border-color: #8a6a1c; color: var(--mount); }
-      .chips span.needs { border-color: #8a3b2c; color: #ff8a6a; }
-      .card.fitted::after { content: 'FITTED'; position: absolute; top: 5px; right: 6px; font-size: 10px; color: #1d1918;
-        background: var(--mount); padding: 0 4px; }
+      .chips span { font-size: 11px; padding: 0 5px; color: var(--dim); background: var(--well); border: 1px solid;
+        border-color: var(--bevel-lo) var(--bevel-hi) var(--bevel-hi) var(--bevel-lo); }
+      .chips span.slot { color: var(--yellow); }
+      .chips span.needs { color: var(--bad); }
+      .card.fitted::after { content: 'FITTED'; position: absolute; top: 5px; right: 6px; padding: 0 5px; font-size: 10px; font-weight: bold;
+        color: #2a1606; background: var(--yellow); border: 1px solid #8a560e; }
       .card.body { cursor: pointer; }
-      .card.body.chosen { border-color: var(--mount); }
-      .card.locked { opacity: .4; cursor: not-allowed; }
-      .card.locked:hover { border-color: var(--edge); }
-      .card.soon::after { content: 'NOT YET'; position: absolute; top: 5px; right: 6px; font-size: 10px; color: var(--dim);
-        border: 1px solid var(--edge); padding: 0 4px; }
+      .card.body.chosen { box-shadow: inset 0 0 0 2px var(--yellow); }
+      .card.locked { opacity: .45; cursor: not-allowed; }
+      .card.locked:hover { box-shadow: none; }
+      .card.soon::after { content: 'NOT YET'; position: absolute; top: 5px; right: 6px; padding: 0 5px; font-size: 10px; color: var(--dim);
+        background: var(--well); border: 1px solid var(--bevel-lo); }
       .nested { margin-left: 18px; }
       .nested::before { content: ''; position: absolute; left: -14px; top: -8px; width: 10px; height: 26px;
-        border-left: 2px solid var(--edge); border-bottom: 2px solid var(--edge); }
+        border-left: 2px solid var(--bevel-hi); border-bottom: 2px solid var(--bevel-hi); }
       .card.wanted { animation: want 0.9s steps(2) infinite; }
-      @keyframes want { 50% { border-color: var(--mount); } }
-      .row { display: grid; grid-template-columns: 82px 1fr 18px; gap: 6px; align-items: center; padding: 3px 0;
-        border-bottom: 1px dotted #3d332c; }
+      @keyframes want { 50% { box-shadow: inset 0 0 0 2px var(--yellow); } }
+      .list { margin: 2px 0 8px; }
+      .row { display: grid; grid-template-columns: 74px 1fr 22px; gap: 6px; align-items: center; min-height: 28px; padding: 2px 6px;
+        border-bottom: 1px solid #2a221e; }
+      .row:last-child { border-bottom: none; }
       .row .slot { color: var(--dim); }
-      .row .empty { color: #6f6253; }
-      .row button { padding: 0 4px; box-shadow: none; border-width: 1px; }
-      .warn { color: #ff8a6a; font-size: 11.5px; margin: 6px 0 0; }
-      .ok { color: #9cff57; font-size: 11.5px; margin: 6px 0 0; }
-      .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
-      button { background: #3b302b; color: var(--ink); border: 2px solid var(--edge); font: inherit; padding: 5px 6px; cursor: pointer;
-        box-shadow: 2px 2px 0 rgba(0,0,0,.4); }
-      button:hover { border-color: var(--hi); }
-      #ghost { position: fixed; pointer-events: none; display: none; z-index: 10; transform: translate(14px, 10px);
-        background: var(--card); border: 2px solid var(--mount); padding: 3px 8px; box-shadow: 3px 3px 0 rgba(0,0,0,.45); }
-      #ghost.snapped { border-color: #fff6c0; color: #fff6c0; }
-      #prompt { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); pointer-events: none; text-align: center;
-        background: var(--panel); border: 2px solid var(--edge); padding: 8px 14px; box-shadow: 4px 4px 0 rgba(0,0,0,.35); }
-      #prompt b { color: var(--mount); font-weight: normal; }
-      #hud { position: absolute; left: 320px; bottom: 12px; background: var(--panel); border: 2px solid var(--edge); padding: 6px 10px;
-        color: var(--dim); white-space: pre; pointer-events: none; }
-      #hud b { color: var(--ink); font-weight: normal; }
-      #nogpu { position: absolute; inset: 0; display: none; place-items: center; text-align: center; padding: 40px; background: #1d1918; }
-      #nogpu div { max-width: 520px; }
+      .row .empty { color: var(--mute); font-style: italic; }
+      .row button { min-height: 20px; height: 20px; width: 22px; padding: 0; font-size: 13px; }
+      .warn { color: var(--bad); font-size: 11.5px; margin: 4px 0 0; }
+      .ok { color: var(--good); font-size: 11.5px; margin: 4px 0 0; font-weight: bold; }
+      .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+      #ghost { position: fixed; pointer-events: none; display: none; z-index: 10; transform: translate(14px, 10px); }
+      #ghost.snapped { background: #ffe58a; }
+      #prompt { position: absolute; left: calc(50% + 159px); top: 22%; transform: translateX(-50%); pointer-events: none; padding: 7px 12px; }
+      #hud { left: 318px; right: 0; bottom: 0; }
     </style>
   </head>
   <body>
     <canvas id="gpu"></canvas>
     <canvas id="overlay"></canvas>
-    <div id="bin" class="panel">
-      <h1>Workshop</h1>
-      <div class="sub">drag parts onto the mounts · <a href="./">walker bench</a></div>
-      <div id="parts"></div>
+    <div id="bin" class="window">
+      <div class="titlebar">Parts bin</div>
+      <div class="wbody">
+        <div class="sub">Drag parts onto the mounts. <a href="./">Walker bench</a></div>
+        <div id="parts"></div>
+      </div>
     </div>
-    <div id="sheet" class="panel"></div>
-    <div id="prompt"></div>
-    <div id="ghost"></div>
-    <div id="hud"></div>
+    <div id="sheetwin" class="window">
+      <div class="titlebar">Build sheet</div>
+      <div id="sheet" class="wbody"></div>
+    </div>
+    <div id="prompt" class="tooltip"></div>
+    <div id="ghost" class="tooltip"></div>
+    <div id="hud" class="statusbar"><div class="sunken"></div></div>
     <div id="nogpu"><div><h1>WebGPU unavailable</h1><p id="nogpu-msg"></p>
       <p>Try a recent Chrome, Edge or Safari, or Firefox Nightly with WebGPU enabled.</p></div></div>
     <script type="module" src="/src/workshop.ts"></script>

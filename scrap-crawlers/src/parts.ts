@@ -3,6 +3,10 @@
 import { Design, HeadStyle, defaultDesign } from './creature';
 import { SlotId, ToolSlot } from './tools';
 
+/** Every mount except the sides, which are for legs. */
+const ANY: ToolSlot[] = ['fronttop', 'front', 'spine', 'back'];
+const TOPS: ToolSlot[] = ['fronttop', 'spine', 'back'];
+
 export type BodyId = 'box' | 'drum' | 'pod';
 export type Section = 'legs' | 'control' | 'weapons';
 
@@ -30,7 +34,8 @@ const legKit = (id: string, name: string, blurb: string, stats: string[], kit: P
   id, name, section: 'legs', fits: ['legs'], blurb, stats, apply: (d) => Object.assign(d, kit),
 });
 const control = (id: HeadStyle, name: string, blurb: string, stats: string[], antennae: number): PartDef => ({
-  id, name, section: 'control', fits: ['head'], blurb, stats, apply: (d) => Object.assign(d, { head: id, antennae }),
+  id, name, section: 'control', fits: ANY, blurb, stats,
+  apply: (d, slot) => Object.assign(d, { head: id, headSlot: slot, antennae }),
 });
 
 export const PARTS: PartDef[] = [
@@ -59,13 +64,13 @@ export const PARTS: PartDef[] = [
     apply: (d) => (d.tools.front = 'wedge'),
   },
   {
-    id: 'pincer', name: 'Pincer claw', section: 'weapons', fits: ['front'], stats: ['grab', 'hold'], needs: 'pneumatics',
-    blurb: 'Air-driven jaws that grab and hold. Dead weight without air.',
-    apply: (d) => (d.tools.front = 'pincer'),
+    id: 'pincer', name: 'Pincer claw', section: 'weapons', fits: ANY, stats: ['grab', 'hold'], needs: 'pneumatics',
+    blurb: 'Air-driven jaws that grab and hold. Reaches the way its mount faces. Dead weight without air.',
+    apply: (d, slot) => (d.tools[slot as ToolSlot] = 'pincer'),
   },
   {
-    id: 'pneumatics', name: 'Pneumatics tank', section: 'weapons', fits: ['spine', 'back'], stats: ['powers pincer'], under: 'pincer',
-    blurb: 'Compressed air for the pincer. Fits the spine or back.',
+    id: 'pneumatics', name: 'Pneumatics tank', section: 'weapons', fits: TOPS, stats: ['powers pincer'], under: 'pincer',
+    blurb: 'Compressed air for the pincer. Sits on any top mount.',
     apply: (d, slot) => (d.tools[slot as ToolSlot] = 'pneumatics'),
   },
 ];
@@ -73,9 +78,9 @@ export const PARTS: PartDef[] = [
 export const part = (id: string) => PARTS.find((p) => p.id === id);
 
 export const SLOT_NAMES: Record<SlotId, string> = {
-  legs: 'Sides', head: 'Front top', front: 'Front face', spine: 'Spine', back: 'Back top',
+  legs: 'Sides', fronttop: 'Front top', front: 'Front face', spine: 'Spine', back: 'Back top',
 };
-export const SLOT_ORDER: SlotId[] = ['legs', 'head', 'front', 'spine', 'back'];
+export const SLOT_ORDER: SlotId[] = ['legs', 'fronttop', 'front', 'spine', 'back'];
 
 export interface Build {
   body: BodyId | null;
@@ -100,15 +105,25 @@ export function problems(b: Build): string[] {
   const fitted = Object.values(b.slots);
   const out: string[] = [];
   if (!b.slots.legs) out.push('No legs: it can only sit there.');
-  if (!b.slots.head) out.push('No control module: nothing is driving.');
-  for (const id of fitted) {
+  if (!fitted.some((id) => part(id!)?.section === 'control')) out.push('No control module: nothing is driving.');
+  for (const id of new Set(fitted)) {
     const p = part(id!);
-    if (p?.needs && !fitted.includes(p.needs)) out.push(`${p.name} has no air: fit a ${part(p.needs)!.name} on the spine or back.`);
+    if (p?.needs && !fitted.includes(p.needs)) out.push(`${p.name} has no air: fit a ${part(p.needs)!.name} on a top mount.`);
   }
   return out;
 }
 
-/** Builds round-trip through the URL as `box;legs=crab;head=tv;front=pincer`. */
+/** Fits a part to a mount. A build has one control module, so fitting another moves it. */
+export function fit(b: Build, slot: SlotId, id: string): Build {
+  const slots = { ...b.slots };
+  if (part(id)?.section === 'control') {
+    for (const s of SLOT_ORDER) if (part(slots[s] ?? '')?.section === 'control') delete slots[s];
+  }
+  slots[slot] = id;
+  return { body: b.body, slots };
+}
+
+/** Builds round-trip through the URL as `box;legs=crab;fronttop=tv;front=pincer`. */
 export function encodeBuild(b: Build): string {
   if (!b.body) return '';
   return [b.body, ...SLOT_ORDER.filter((s) => b.slots[s]).map((s) => `${s}=${b.slots[s]}`)].join(';');
@@ -122,7 +137,7 @@ export function decodeBuild(s: string | null): Build {
   b.body = body as BodyId;
   for (const kv of rest) {
     const [slot, id] = kv.split('=') as [SlotId, string];
-    if (part(id)?.fits.includes(slot)) b.slots[slot] = id;
+    if (part(id)?.fits.includes(slot)) Object.assign(b, fit(b, slot, id));
   }
   return b;
 }

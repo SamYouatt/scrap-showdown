@@ -12,13 +12,14 @@ import {
   norm, qAxisAngle, qIdentity, qLook, qRotate, rng, scale, smoothstep, sub, toWorld, wrapAngle,
 } from './math';
 import { bentChain, fabrik } from './ik';
-import { Dims, Toolkit, Tools } from './tools';
+import { Dims, Mount, ToolSlot, Toolkit, Tools, mountAt } from './tools';
 import { Terrain } from './world';
 
 export type Gait = 'trot' | 'creep' | 'scurry';
 export type LegStyle = 'pipe' | 'girder' | 'piston';
 export type HeadStyle = 'can' | 'tv' | 'lamp';
 export type Hull = 'crate' | 'drum' | 'pod';
+export type CreaturePiece = 'hull' | 'legs' | 'head' | 'tools';
 
 export interface Design {
   seed: number;
@@ -38,8 +39,9 @@ export interface Design {
   gait: Gait;
   tail: number;
   antennae: number;
-  /** The control module. Null leaves the front-top mount empty. */
+  /** The control module, and the mount it sits on (it faces the way that mount faces). */
   head: HeadStyle | null;
+  headSlot: ToolSlot;
   /** Tools on the hull's tool mounts. */
   tools: Tools;
   /** Bolt seeded random scrap onto the hull. Off keeps the hull clear for mounted parts. */
@@ -50,7 +52,7 @@ export const defaultDesign = (): Design => ({
   seed: 7, palette: 0, hull: 'crate', bodyLength: 1.3, bodyWidth: 0.8,
   legPairs: 3, legSegments: 3, legLength: 1.1, legSpread: 1, legStyle: 'pipe',
   rideHeight: 0.45, stepHeight: 0.3, stepSpeed: 1, walkSpeed: 1.6, gait: 'trot',
-  tail: 6, antennae: 2, head: 'can', tools: {}, junk: true,
+  tail: 6, antennae: 2, head: 'can', headSlot: 'fronttop', tools: {}, junk: true,
 });
 
 export function hullDims(d: Design): Dims {
@@ -68,7 +70,7 @@ export function randomDesign(seed: number): Design {
     rideHeight: round(r.range(0.25, 0.7), 0.05), stepHeight: round(r.range(0.15, 0.5), 0.05),
     stepSpeed: round(r.range(0.7, 1.6), 0.05), walkSpeed: round(r.range(1, 2.4), 0.1),
     gait: r.pick(['trot', 'creep', 'scurry'] as const), tail: r.int(0, 10), antennae: r.int(0, 2),
-    head: r.pick(['can', 'tv', 'lamp'] as const), tools: {}, junk: true,
+    head: r.pick(['can', 'tv', 'lamp'] as const), headSlot: 'fronttop', tools: {}, junk: true,
   };
 }
 
@@ -138,6 +140,16 @@ export class Creature {
   goal: V3 | null = null;
   drive: V3 | null = null;
   lookPoint: V3 | null = null;
+  /** Which way to face, independent of where it walks (so it can back up or sidestep). */
+  face: V3 | null = null;
+  /** Shove from hits, in m/s. It decays on its own. */
+  push: V3 = [0, 0, 0];
+  /** Scales walking speed: held in a pincer, or no legs to walk on. */
+  mobility = 1;
+  /** Moves a planned foothold somewhere it may land, such as off another creature. */
+  avoid: ((p: V3) => V3) | null = null;
+  /** Knocked out: stops walking and sags onto its legs. */
+  down = false;
   stride = 0.4;
 
   private readonly L: number;
@@ -146,6 +158,7 @@ export class Creature {
   private readonly hs: number;
   private readonly th: number;
   private readonly parts: Part[];
+  private readonly headMount: Mount;
   readonly toolkit: Toolkit;
   private up: V3 = [0, 1, 0];
   private bodyY: number;
@@ -168,6 +181,7 @@ export class Creature {
     this.W = dims.W;
     this.H = dims.H;
     this.toolkit = new Toolkit(design.tools, dims, world);
+    this.headMount = mountAt(dims, design.headSlot);
     this.hs = 0.26 + this.W * 0.14;
     this.th = 0.07 * Math.sqrt(design.legLength) + 0.025;
     this.stride = Math.max(0.25, design.legLength * 0.42 * design.legSpread);
@@ -197,7 +211,7 @@ export class Creature {
     }
 
     this.headPos = toWorld(this.frame, this.headAnchor());
-    this.headDir = qRotate(this.frame.q, [0, 0, 1]);
+    this.headDir = qRotate(this.frame.q, this.headMount.aim);
     for (let i = 0; i <= design.tail; i++) this.tail.push(toWorld(this.frame, [0, 0, -this.L / 2 - i * 0.14]));
     for (let i = 0; i < design.antennae; i++) {
       const base: V3 = [design.antennae === 1 ? 0 : (i ? -1 : 1) * this.hs * 0.3, this.hs * 0.55, -this.hs * 0.1];
@@ -221,8 +235,11 @@ export class Creature {
     return [x, this.world.heightAt(x, z), z];
   }
 
+  /** Where the head floats: out from its mount along the normal, nudged the way the mount faces. */
   private headAnchor(): V3 {
-    return [0, this.H * 0.45 + this.hs * 0.55, this.L / 2 + this.hs * 0.25];
+    const m = this.headMount;
+    const lean = m.slot === 'fronttop' || m.slot === 'back' ? 0.16 + this.hs * 0.25 : 0;
+    return addScaled(addScaled(m.p, m.n, this.hs * 0.55 + (m.slot === 'front' ? 0.05 : 0)), m.aim, lean);
   }
 
   update(dt: number, time: number) {
@@ -240,7 +257,9 @@ export class Creature {
   private move(dt: number) {
     const d = this.design;
     let wish: V3 = [0, 0, 0];
-    if (this.drive) {
+    if (this.down) {
+      // Knocked out: no more walking.
+    } else if (this.drive) {
       wish = scale(norm(this.drive), d.walkSpeed);
     } else if (this.goal) {
       const to: V3 = [this.goal[0] - this.pos[0], 0, this.goal[2] - this.pos[2]];
@@ -250,7 +269,14 @@ export class Creature {
     }
     // Turn towards where we want to go, and don't charge sideways while turning.
     let yawRate = 0;
-    if (len(wish) > 0.05) {
+    wish = scale(wish, this.mobility);
+    if (this.face && !this.down) {
+      // Face one way and walk another: backing up is slower than going forwards.
+      const diff = wrapAngle(Math.atan2(this.face[0], this.face[2]) - this.yaw);
+      yawRate = clamp(diff * 4, -2.6, 2.6);
+      const along = len(wish) > 1e-3 ? dot(norm(wish), [Math.sin(this.yaw), 0, Math.cos(this.yaw)]) : 1;
+      wish = scale(wish, 0.55 + 0.45 * Math.max(0, along));
+    } else if (len(wish) > 0.05) {
       const want = Math.atan2(wish[0], wish[2]);
       const diff = wrapAngle(want - this.yaw);
       yawRate = clamp(diff * 4, -2.6, 2.6);
@@ -259,7 +285,8 @@ export class Creature {
     this.yawRate = mix(this.yawRate, yawRate, damp(8, dt));
     this.yaw = wrapAngle(this.yaw + this.yawRate * dt);
     this.vel = lerp(this.vel, wish, damp(3, dt));
-    const next = addScaled(this.pos, this.vel, dt);
+    const next = addScaled(addScaled(this.pos, this.vel, dt), this.push, dt);
+    this.push = scale(this.push, 1 - damp(3, dt));
     const lim = this.world.half - 2;
     next[0] = clamp(next[0], -lim, lim);
     next[2] = clamp(next[2], -lim, lim);
@@ -275,7 +302,7 @@ export class Creature {
     for (const l of this.legs) sum += l.stepping ? mix(l.from[1], l.desired[1], 0.5) : l.foot[1];
     const floor = this.world.heightAt(this.pos[0], this.pos[2]) + this.H * 0.5 + 0.06;
     // Without legs the hull just rests on the floor.
-    const targetY = this.legs.length ? Math.max(sum / this.legs.length + d.rideHeight * d.legLength + this.H * 0.3, floor) : floor;
+    const targetY = this.legs.length && !this.down ? Math.max(sum / this.legs.length + d.rideHeight * d.legLength + this.H * 0.3, floor) : floor;
     // Critically-ish damped spring: footfalls kick it, so the body bobs.
     this.bodyVy += ((targetY - this.bodyY) * 70 - this.bodyVy * 13) * dt;
     this.bodyY += this.bodyVy * dt;
@@ -324,11 +351,19 @@ export class Creature {
   private updateLegs(dt: number) {
     const dur = this.stepDuration();
     const speed = len(this.vel) + Math.abs(this.yawRate) * 0.5;
-    for (const l of this.legs) l.desired = this.restWorld(l.rest, dur * 0.7);
+    for (const l of this.legs) {
+      const p = this.restWorld(l.rest, dur * 0.7);
+      const q = this.avoid ? this.avoid(p) : p;
+      l.desired = q === p ? p : [q[0], this.world.heightAt(q[0], q[2]), q[2]];
+    }
 
     const candidates = this.legs
       .filter((l) => !l.stepping)
-      .map((l) => ({ l, err: distXZ(l.foot, l.desired) + Math.abs(l.foot[1] - l.desired[1]) * 0.5 }))
+      .map((l) => ({
+        l,
+        err: distXZ(l.foot, l.desired) + Math.abs(l.foot[1] - l.desired[1]) * 0.5 +
+          (this.avoid && this.avoid(l.foot) !== l.foot ? this.stride * 2 : 0),
+      }))
       .filter(({ err }) => err > this.stride || (speed < 0.08 && err > 0.07))
       .sort((a, b) => b.err - a.err);
     for (const { l, err } of candidates) {
@@ -381,8 +416,8 @@ export class Creature {
     this.headPos = addScaled(this.headPos, this.headVel, dt);
     if (dist(this.headPos, target) > 0.35) this.headPos = add(target, scale(norm(sub(this.headPos, target)), 0.35));
 
-    const fwd = qRotate(this.frame.q, [0, 0, 1]);
-    const look = this.lookPoint ?? this.goal ?? addScaled(this.headPos, fwd, 3);
+    const fwd = qRotate(this.frame.q, this.headMount.aim);
+    const look = this.lookPoint ?? (this.headMount.aim[2] > 0 ? this.goal : null) ?? addScaled(this.headPos, fwd, 3);
     let want = norm(sub(look, this.headPos), fwd);
     want = norm([want[0], clamp(want[1], -0.5, 0.4), want[2]]);
     if (dot(want, fwd) < 0.3) want = norm(lerp(fwd, want, 0.4));
@@ -459,12 +494,18 @@ export class Creature {
     this.dust = this.dust.filter((d) => d.life < d.max);
   }
 
-  draw(list: DrawList) {
+  /** Draws the creature, or only some of its pieces (the workshop uses that for part previews). */
+  draw(list: DrawList, only?: CreaturePiece[]) {
     const P = this.pal;
-    for (const part of this.parts) list.addLocal(this.frame, part.prim, part.p, part.q, part.s, part.col, part.mat);
-    this.drawLegs(list);
-    this.drawHead(list);
-    this.toolkit.draw(list, this.frame, P);
+    const on = (k: CreaturePiece) => !only || only.includes(k);
+    if (on('hull')) for (const part of this.parts) list.addLocal(this.frame, part.prim, part.p, part.q, part.s, part.col, part.mat);
+    if (on('legs')) this.drawLegs(list);
+    if (on('head')) this.drawHead(list);
+    if (on('tools')) this.toolkit.draw(list, this.frame, P);
+    if (only) {
+      if (on('head')) this.drawAntennae(list);
+      return;
+    }
 
     for (let k = 1; k < this.tail.length; k++) {
       const a = this.tail[k - 1], b = this.tail[k];
@@ -477,14 +518,18 @@ export class Creature {
       list.add(Prim.Sphere, tip, qIdentity(), [0.09, 0.09, 0.09], P.glow, Mat.Emissive);
     }
 
-    for (const a of this.antennae) {
-      for (let k = 1; k < a.pts.length; k++) list.seg(Prim.Box, a.pts[k - 1], a.pts[k], [0.025, 1, 0.025], P.dark, [1, 0, 0]);
-      list.add(Prim.Sphere, a.pts[a.pts.length - 1], qIdentity(), [0.07, 0.07, 0.07], P.glow, Mat.Emissive);
-    }
+    this.drawAntennae(list);
 
     for (const d of this.dust) {
       const s = d.size * (1 - d.life / d.max);
       list.add(Prim.Box, d.p, qIdentity(), [s, s, s], [0.78, 0.7, 0.56]);
+    }
+  }
+
+  private drawAntennae(list: DrawList) {
+    for (const a of this.antennae) {
+      for (let k = 1; k < a.pts.length; k++) list.seg(Prim.Box, a.pts[k - 1], a.pts[k], [0.025, 1, 0.025], this.pal.dark, [1, 0, 0]);
+      list.add(Prim.Sphere, a.pts[a.pts.length - 1], qIdentity(), [0.07, 0.07, 0.07], this.pal.glow, Mat.Emissive);
     }
   }
 
@@ -520,7 +565,7 @@ export class Creature {
     const P = this.pal, hs = this.hs;
     const hf = this.headFrame();
     // Springy neck: a few coils between the chassis and the bobbing head.
-    const anchor = toWorld(this.frame, [0, this.H * 0.4, this.L / 2 - 0.05]);
+    const anchor = toWorld(this.frame, addScaled(this.headMount.p, this.headMount.n, -0.05));
     for (let i = 0; i < 4; i++) {
       list.seg(Prim.Cyl, lerp(anchor, hf.p, i / 4), lerp(anchor, hf.p, (i + 1) / 4), [0.12 + (i % 2) * 0.04, 0.7, 0.12 + (i % 2) * 0.04], i % 2 ? P.dark : P.second, [1, 0, 0]);
     }

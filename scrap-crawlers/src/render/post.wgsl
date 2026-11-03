@@ -8,7 +8,7 @@ struct Post {
   a: vec4f, // screen.xy (device px), low.xy (texels)
   b: vec4f, // offset.xy (texels), scale (device px per texel), outlines on/off
   c: vec4f, // texelOrigin.xy, palette on/off, texel size (world units)
-  d: vec4f, // x: depth range (far - near)
+  d: vec4f, // x: depth range (far - near), y: transparent background on/off
 };
 
 @group(0) @binding(0) var<uniform> P: Post;
@@ -76,5 +76,7 @@ fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
     let thr = bayer4(t + vec2i(P.c.xy)) - 0.5;
     col = clamp(floor(col * (levels - 1.0) + 0.5 + thr * 0.9) / (levels - 1.0), vec3f(0.0), vec3f(1.0));
   }
-  return vec4f(col, 1.0);
+  // Background texels have no normal; a transparent renderer leaves them clear (premultiplied alpha).
+  let alpha = select(1.0, n4.w, P.d.y > 0.5);
+  return vec4f(col * alpha, alpha);
 }

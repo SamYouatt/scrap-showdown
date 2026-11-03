@@ -6,15 +6,16 @@ import { DrawList, Mat } from './render/drawlist';
 import { Prim, primitiveMeshes } from './render/mesh';
 import { Renderer } from './render/renderer';
 import { Creature, hullDims } from './creature';
-import { BODIES, Build, PARTS, PartDef, SLOT_NAMES, SLOT_ORDER, Section, decodeBuild, designFor, encodeBuild, part, problems } from './parts';
+import { BODIES, Build, PARTS, PartDef, SLOT_NAMES, SLOT_ORDER, Section, decodeBuild, designFor, encodeBuild, fit, part, problems } from './parts';
 import { Mount, SlotId, mountPoints } from './tools';
 import { WorkshopRoom } from './room';
+import { PREVIEW_H, PREVIEW_W, renderPreviews } from './previews';
 import { V3, add, clamp, mix, norm, qAlongY, scale, toWorld } from './math';
 
 const params = new URLSearchParams(location.search);
 const canvas = document.getElementById('gpu') as HTMLCanvasElement;
 const overlay = document.getElementById('overlay') as HTMLCanvasElement;
-const hud = document.getElementById('hud') as HTMLDivElement;
+const hud = document.querySelector('#hud > div') as HTMLDivElement;
 const ghost = document.getElementById('ghost') as HTMLDivElement;
 const prompt = document.getElementById('prompt') as HTMLDivElement;
 
@@ -27,6 +28,7 @@ try {
   throw e;
 }
 
+const previews = await renderPreviews();
 const room = new WorkshopRoom();
 renderer.setMeshes([...primitiveMeshes(), room.mesh]);
 const settings = { pixelSize: Number(params.get('pixel') ?? 3), outlines: true, palette: false, shadows: true };
@@ -75,15 +77,27 @@ function chip(text: string, cls = '') {
   return `<span class="${cls}">${text}</span>`;
 }
 
+/** Short name for where a part fits: one mount by name, otherwise "Any mount" or "Top mounts". */
+function mountsLabel(fits: SlotId[]) {
+  if (fits.length === 1) return SLOT_NAMES[fits[0]];
+  if (fits.includes('front')) return 'Any mount';
+  return 'Top mounts';
+}
+
+function thumb(id: string) {
+  return `<img class="thumb" src="${previews.get(id)}" width="${PREVIEW_W}" height="${PREVIEW_H}" alt="" draggable="false">`;
+}
+
 function card(p: PartDef) {
   const fitted = Object.values(build.slots).includes(p.id);
   const wanted = p.under && Object.values(build.slots).includes(p.under) && !fitted;
   const el = document.createElement('div');
   el.className = `card${p.under ? ' nested' : ''}${fitted ? ' fitted' : ''}${wanted ? ' wanted' : ''}${build.body ? '' : ' locked'}`;
-  el.innerHTML = `<div class="name">${p.name}</div><div class="blurb">${p.blurb}</div><div class="chips">` +
+  el.title = p.blurb;
+  el.innerHTML = thumb(p.id) + `<div><div class="name">${p.name}</div><div class="chips">` +
     p.stats.map((s) => chip(s)).join('') +
-    chip(p.fits.map((s) => SLOT_NAMES[s]).join(' / '), 'slot') +
-    (p.needs ? chip(`needs ${part(p.needs)!.name}`, 'needs') : '') + '</div>';
+    chip(mountsLabel(p.fits), 'slot') +
+    (p.needs ? chip(`needs ${part(p.needs)!.name}`, 'needs') : '') + '</div></div>';
   el.addEventListener('pointerdown', (e) => {
     if (!build.body || e.button !== 0) return;
     e.preventDefault();
@@ -100,7 +114,8 @@ function renderBin() {
   for (const b of BODIES) {
     const el = document.createElement('div');
     el.className = `card body${b.ready ? '' : ' locked soon'}${build.body === b.id ? ' chosen fitted' : ''}`;
-    el.innerHTML = `<div class="name">${b.name}</div><div class="blurb">${b.blurb}</div>`;
+    el.title = b.blurb;
+    el.innerHTML = thumb(b.id) + `<div><div class="name">${b.name}</div></div>`;
     if (b.ready) el.addEventListener('click', () => build.body !== b.id && commit({ body: b.id, slots: {} }));
     root.append(el);
   }
@@ -117,9 +132,11 @@ function renderSheet() {
   const root = document.getElementById('sheet') as HTMLDivElement;
   prompt.style.display = build.body ? 'none' : 'block';
   prompt.innerHTML = 'Pick a <b>body</b> from the parts bin to start a build';
-  root.style.display = build.body ? 'block' : 'none';
+  root.parentElement!.style.display = build.body ? '' : 'none';
   if (!build.body) return;
-  root.innerHTML = `<h1>Build sheet</h1><div class="sub">${BODIES.find((b) => b.id === build.body)!.name}</div>`;
+  root.innerHTML = `<div class="sub">${BODIES.find((b) => b.id === build.body)!.name}</div>`;
+  const list = Object.assign(document.createElement('div'), { className: 'list sunken' });
+  root.append(list);
   for (const slot of SLOT_ORDER) {
     const row = document.createElement('div');
     row.className = 'row';
@@ -130,18 +147,20 @@ function renderSheet() {
       x.addEventListener('click', () => commit(without(slot)));
       row.append(x);
     }
-    root.append(row);
+    list.append(row);
   }
   const issues = problems(build);
   for (const msg of issues) root.append(Object.assign(document.createElement('div'), { className: 'warn', textContent: `! ${msg}` }));
   if (!issues.length) root.append(Object.assign(document.createElement('div'), { className: 'ok', textContent: 'Ready to crawl.' }));
   const buttons = document.createElement('div');
   buttons.className = 'buttons';
-  const button = (text: string, fn: () => void) => {
-    const b = Object.assign(document.createElement('button'), { textContent: text });
+  const button = (text: string, fn: () => void, className = '') => {
+    const b = Object.assign(document.createElement('button'), { textContent: text, className });
     b.addEventListener('click', fn);
     buttons.append(b);
   };
+  button('Fight!', () => (location.href = `./arena.html?a=${encodeURIComponent(encodeBuild(build))}`), 'primary');
+  button('Rivals', () => (location.href = './arena.html'));
   button('Strip parts', () => commit({ body: build.body, slots: {} }));
   button('Scrap it', () => commit({ body: null, slots: {} }));
   root.append(buttons);
@@ -228,7 +247,7 @@ function drawMounts(time: number) {
 function slotLabel(slot: SlotId) {
   const sections = [...new Set(PARTS.filter((p) => p.fits.includes(slot)).map((p) => p.section))];
   const names: Record<Section, string> = { legs: 'leg kits', control: 'control modules', weapons: 'weapons & tools' };
-  return [SLOT_NAMES[slot].toUpperCase(), sections.map((s) => names[s]).join(', ')];
+  return [SLOT_NAMES[slot], sections.map((s) => names[s]).join(', ')];
 }
 
 // ---------------------------------------------------------------- input
@@ -258,8 +277,7 @@ function endDrag() {
   ghost.style.display = 'none';
   // The build only changes on release. Dropping away from a mount pulls a fitted part off.
   const next = from ? without(from) : build;
-  if (snap) next.slots[snap] = p.id;
-  if (from || snap) commit(next);
+  if (from || snap) commit(snap ? fit(next, snap, p.id) : next);
 }
 
 let orbit: { x: number; y: number; yaw: number; pitch: number } | null = null;
@@ -363,17 +381,24 @@ function drawOverlay() {
   const d = dpr();
   const [title, sub] = slotLabel(slot);
   const fitted = build.slots[slot] && !drag ? part(build.slots[slot]!)!.name : sub;
-  g.font = `${12 * d}px ui-monospace, Menlo, monospace`;
-  const w = Math.max(g.measureText(title).width, g.measureText(fitted).width) + 16 * d;
+  // Drawn like an XP tooltip: pale yellow, thin dark border, hard shadow.
+  g.font = `bold ${12 * d}px Tahoma, Verdana, 'DejaVu Sans', sans-serif`;
+  const tw = g.measureText(title).width;
+  g.font = `${12 * d}px Tahoma, Verdana, 'DejaVu Sans', sans-serif`;
+  const w = Math.round(Math.max(tw, g.measureText(fitted).width) + 16 * d), h = Math.round(38 * d);
   const bx = Math.round(x + 18 * d), by = Math.round(y - 44 * d);
-  g.fillStyle = 'rgba(32,27,26,.92)';
-  g.fillRect(bx, by, w, 38 * d);
-  g.strokeStyle = '#ffd23a';
-  g.lineWidth = 2 * d;
-  g.strokeRect(bx, by, w, 38 * d);
-  g.fillStyle = '#ffd23a';
+  g.fillStyle = 'rgba(0,0,0,.45)';
+  g.fillRect(bx + 2 * d, by + 2 * d, w, h);
+  g.fillStyle = '#fff3c4';
+  g.fillRect(bx, by, w, h);
+  g.strokeStyle = '#2a1d10';
+  g.lineWidth = d;
+  g.strokeRect(bx + d / 2, by + d / 2, w - d, h - d);
+  g.fillStyle = '#b4561b';
+  g.font = `bold ${12 * d}px Tahoma, Verdana, 'DejaVu Sans', sans-serif`;
   g.fillText(title, bx + 8 * d, by + 15 * d);
-  g.fillStyle = '#b7a98f';
+  g.fillStyle = '#2a1d10';
+  g.font = `${12 * d}px Tahoma, Verdana, 'DejaVu Sans', sans-serif`;
   g.fillText(fitted, bx + 8 * d, by + 31 * d);
 }
 

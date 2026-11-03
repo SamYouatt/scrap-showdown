@@ -58,6 +58,7 @@ export class Renderer {
     private ctx: GPUCanvasContext,
     private format: GPUTextureFormat,
     readonly adapterName: string,
+    private transparent: boolean,
   ) {
     const scene = device.createShaderModule({ code: sceneSrc });
     const post = device.createShaderModule({ code: postSrc });
@@ -103,20 +104,21 @@ export class Renderer {
     });
   }
 
-  static async create(canvas: HTMLCanvasElement): Promise<Renderer> {
+  /** Transparent renderers leave the background clear, for previews laid over the page. */
+  static async create(canvas: HTMLCanvasElement, transparent = false): Promise<Renderer> {
     if (!navigator.gpu) throw new Error('This browser does not expose WebGPU (navigator.gpu is missing).');
     const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
     if (!adapter) throw new Error('WebGPU is available but no GPU adapter was found.');
     const device = await adapter.requestDevice();
-    device.lost.then((info) => console.error('WebGPU device lost:', info.message));
+    device.lost.then((info) => info.reason !== 'destroyed' && console.error('WebGPU device lost:', info.message));
     device.addEventListener('uncapturederror', (e) => console.error('WebGPU error:', (e as GPUUncapturedErrorEvent).error.message));
     const ctx = canvas.getContext('webgpu');
     if (!ctx) throw new Error('Could not create a WebGPU canvas context.');
     const format = navigator.gpu.getPreferredCanvasFormat();
-    ctx.configure({ device, format, alphaMode: 'opaque' });
+    ctx.configure({ device, format, alphaMode: transparent ? 'premultiplied' : 'opaque' });
     const info = adapter.info;
     const name = [info.vendor, info.architecture, info.description].filter(Boolean).join(' ') || 'unknown adapter';
-    return new Renderer(device, ctx, format, name);
+    return new Renderer(device, ctx, format, name, transparent);
   }
 
   setMeshes(meshes: Float32Array[]) {
@@ -191,7 +193,7 @@ export class Renderer {
         cam.screenW, cam.screenH, cam.lowW, cam.lowH,
         cam.offset[0], cam.offset[1], cam.scale, opts.outlines ? 1 : 0,
         cam.texelOrigin[0], cam.texelOrigin[1], opts.palette ? 1 : 0, cam.texel,
-        cam.far - cam.near, 0, 0, 0,
+        cam.far - cam.near, this.transparent ? 1 : 0, 0, 0,
       ]),
     );
 
