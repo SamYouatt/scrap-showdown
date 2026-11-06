@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HeapFactory · greybox</title>
+    <style>
+      :root {
+        --ink: #fff4e2;
+        --dim: rgba(255, 244, 226, 0.65);
+        --panel: rgba(42, 28, 34, 0.42);
+        --mint: #7ff0c8;
+        --warn: #ff8a5b;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #d9a77e; font-family: ui-rounded, 'Nunito', 'Segoe UI', system-ui, sans-serif; color: var(--ink); }
+      canvas { display: block; }
+      .hud { position: fixed; pointer-events: none; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
+      .panel { background: var(--panel); border-radius: 10px; padding: 10px 12px; backdrop-filter: blur(4px); }
+      #crosshair { left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: var(--ink); box-shadow: 0 0 0 2px rgba(0,0,0,0.25); }
+      #unit { left: 16px; top: 14px; font-size: 12px; letter-spacing: 0.2em; color: var(--dim); }
+      #grid { left: 16px; top: 36px; font-size: 13px; min-width: 210px; }
+      #grid b { color: var(--mint); font-weight: 600; }
+      #battery { left: 16px; bottom: 16px; width: 280px; }
+      #battery .bar { height: 12px; border-radius: 6px; background: rgba(0,0,0,0.35); overflow: hidden; margin-top: 6px; }
+      #battery .fill { height: 100%; width: 100%; background: var(--mint); transition: width 0.15s; }
+      #battery .meta { font-size: 12px; color: var(--dim); margin-top: 6px; min-height: 15px; }
+      #battery.low .fill { background: var(--warn); }
+      #battery.low .meta { color: var(--warn); }
+      #inv { right: 16px; top: 14px; font-size: 13px; min-width: 170px; }
+      #inv h4 { margin: 0 0 6px; font-size: 11px; letter-spacing: 0.15em; color: var(--dim); font-weight: 600; }
+      #inv .row { display: flex; justify-content: space-between; gap: 18px; line-height: 1.55; }
+      #inv .row.zero { opacity: 0.4; }
+      #inv .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; }
+      #prompt { left: 50%; top: calc(50% + 28px); transform: translateX(-50%); font-size: 14px; text-align: center; white-space: pre-line; }
+      #prompt .bad { color: var(--warn); }
+      #toolbar { left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; gap: 6px; }
+      #toolbar .slot { background: var(--panel); border-radius: 8px; padding: 6px 9px; font-size: 12px; min-width: 92px; border: 2px solid transparent; }
+      #toolbar .slot.on { border-color: var(--mint); }
+      #toolbar .slot.cant { opacity: 0.45; }
+      #toolbar .k { color: var(--mint); font-weight: 700; margin-right: 4px; }
+      #toolbar .c { display: block; font-size: 10px; color: var(--dim); margin-top: 2px; }
+      #toasts { left: 50%; top: 18px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; }
+      #toasts div { background: var(--panel); padding: 6px 12px; border-radius: 8px; font-size: 14px; animation: fade 3.2s forwards; }
+      @keyframes fade { 0%, 75% { opacity: 1; } 100% { opacity: 0; } }
+      #objective { left: 16px; top: 128px; width: 300px; font-size: 13px; line-height: 1.45; }
+      #objective h4 { margin: 0 0 4px; font-size: 11px; letter-spacing: 0.15em; color: var(--mint); font-weight: 600; }
+      #objective .title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+      #objective .dist { color: var(--mint); font-weight: 400; font-size: 13px; margin-left: 6px; }
+      #objective .hint { color: var(--dim); }
+      #objective .tip { color: var(--ink); opacity: 0.8; }
+      #objective kbd { display: inline-block; min-width: 16px; text-align: center; background: rgba(255,255,255,0.15); border-radius: 4px; padding: 0 4px; font-family: inherit; color: var(--ink); }
+      #ending { left: 50%; top: 38%; transform: translate(-50%, -50%); text-align: center; opacity: 0; transition: opacity 2s; max-width: 560px; }
+      #ending h2 { margin: 0 0 8px; font-size: 26px; font-weight: 600; letter-spacing: 0.04em; }
+      #ending p { margin: 4px 0; color: var(--dim); }
+      #caption { left: 50%; bottom: 96px; transform: translateX(-50%); max-width: 640px; text-align: center; font-size: 17px; font-style: italic; letter-spacing: 0.02em; color: #fff1dc; opacity: 0; transition: opacity 1.2s; text-shadow: 0 1px 6px rgba(40, 20, 30, 0.8); }
+      #help { right: 16px; bottom: 16px; font-size: 12px; line-height: 1.6; width: 250px; }
+      #help kbd { display: inline-block; min-width: 18px; text-align: center; background: rgba(255,255,255,0.15); border-radius: 4px; padding: 0 4px; margin-right: 4px; font-family: inherit; }
+      #fade { inset: 0; background: #0b0a0c; opacity: 0; transition: opacity 0.8s; display: flex; align-items: center; justify-content: center; font-size: 18px; letter-spacing: 0.1em; }
+      #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: linear-gradient(180deg, rgba(60, 50, 90, 0.35), rgba(120, 60, 50, 0.45)); backdrop-filter: blur(4px); }
+      #overlay .card { background: rgba(38, 26, 32, 0.82); border-radius: 14px; padding: 26px 30px; max-width: 560px; }
+      #overlay h1 { margin: 0 0 4px; font-size: 30px; letter-spacing: 0.04em; font-weight: 600; }
+      #overlay p { color: var(--dim); margin: 6px 0 16px; line-height: 1.5; }
+      #overlay .shapes { display: flex; gap: 8px; margin-bottom: 16px; }
+      #overlay button { flex: 1; font: inherit; color: var(--ink); background: rgba(255,255,255,0.08); border: 2px solid transparent; border-radius: 10px; padding: 10px; cursor: pointer; text-align: left; }
+      #overlay button.on { border-color: var(--mint); }
+      #overlay button small { display: block; color: var(--dim); font-size: 11px; margin-top: 4px; }
+      #overlay .go { width: 100%; text-align: center; background: var(--mint); color: #1e1612; font-weight: 700; }
+    </style>
+  </head>
+  <body>
+    <div id="crosshair" class="hud"></div>
+    <div id="unit" class="hud">UNIT L4z1·</div>
+    <div id="grid" class="hud panel"></div>
+    <div id="battery" class="hud panel">
+      <div>Charge <span id="charge-text"></span></div>
+      <div class="bar"><div class="fill"></div></div>
+      <div class="meta"></div>
+    </div>
+    <div id="inv" class="hud panel"></div>
+    <div id="prompt" class="hud"></div>
+    <div id="toolbar" class="hud"></div>
+    <div id="toasts" class="hud"></div>
+    <div id="caption" class="hud"></div>
+    <div id="objective" class="hud panel" style="display:none"></div>
+    <div id="ending" class="hud panel"><h2>The way down is open</h2><p>The lift runs again. Below: the Industrial Layer, and somewhere under that, the ship.</p><p style="margin-top:12px">That's the end of this prototype. Thanks for playing.</p></div>
+    <div id="help" class="hud panel">
+      <kbd>WASD</kbd>move <kbd>Shift</kbd>sprint <kbd>Space</kbd>jump<br />
+      <kbd>LMB</kbd>grab / drop / place <kbd>RMB</kbd>throw<br />
+      <kbd>E</kbd>salvage · stow bale · look<br />
+      <kbd>B</kbd>drop a bale from your pack<br />
+      <kbd>1-6</kbd>build tools <kbd>R</kbd>rotate <kbd>Q</kbd>cancel<br />
+      <kbd>X</kbd>deconstruct <kbd>G</kbd>free build<br />
+      <kbd>P</kbd>painterly <kbd>M</kbd>sound <kbd>H</kbd>hide help
+    </div>
+    <div id="fade" class="hud"></div>
+    <div id="overlay">
+      <div class="card">
+        <h1>HeapFactory</h1>
+        <p>You are L4z10, a small robot waking up alone in a vast scrap heap. Something on the horizon is calling. Salvage junk for parts, sort and compact scrap into bales, and build outward. Watch your charge.</p>
+        <p style="font-size:13px">Best with sound on.</p>
+        <div class="shapes"></div>
+        <button class="go">Click to start</button>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

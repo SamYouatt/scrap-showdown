@@ -1,0 +1,5 @@
+services:
+  heap:
+    title: HeapFactory prototype
+    command: pnpm dev --port 5173 --strictPort
+    port: 5173
