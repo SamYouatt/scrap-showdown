@@ -24,5 +24,7 @@ services:
         title: Scrap Crawlers workshop
       - url: /arena.html
         title: Scrap Crawlers arena
+      - url: /explore.html
+        title: Scrap Crawlers explore
       - url: /?debug=1
         title: Scrap Crawlers (IK debug)

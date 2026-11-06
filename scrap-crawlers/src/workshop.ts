@@ -161,6 +161,7 @@ function renderSheet() {
   };
   button('Fight!', () => (location.href = `./arena.html?a=${encodeURIComponent(encodeBuild(build))}`), 'primary');
   button('Rivals', () => (location.href = './arena.html'));
+  button('Explore', () => (location.href = `./explore.html?build=${encodeURIComponent(encodeBuild(build))}`));
   button('Strip parts', () => commit({ body: build.body, slots: {} }));
   button('Scrap it', () => commit({ body: null, slots: {} }));
   root.append(buttons);

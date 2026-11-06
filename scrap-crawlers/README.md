@@ -53,6 +53,24 @@ bumps. It turns so its weapon, not necessarily its nose, faces the opponent. You
 win by knockout or by ring-out off the platform. The rules are in
 `src/battle.ts` and the pit is in `src/pit.ts`.
 
+### Explore
+
+`/explore.html` is a Pokémon-style experiment. **Explore** on the workshop's
+build sheet drops your build (`?build=<build>`) into the scrapyard, where six
+wild crawlers wander near their dens. One that spots you (how far depends on
+its control module: lamp-eyes see furthest) shows a "!" and charges. Touching
+one flashes the screen and wipes to the pit for the usual auto-battle. Win and
+it is scrapped. Lose and you are towed back to the green repair pad. **Run**
+leaves a fight early. Damage carries over between fights, and standing on the
+pad repairs it. Wild crawlers ignore you for a few seconds after a fight, so
+you can walk away. Scrap them all and a new set wanders in. Fights out here
+happen in an arena themed to match the area: the scrapyard's is a packed-dirt
+mound walled with tyres and lit by burning drums. Pit themes live in
+`src/pit.ts` (`steel` for the arena page, `yard` for the scrapyard), so new
+areas can add their own. Preview one with `/arena.html?pit=yard`. The page is
+`src/explore.ts`, and the fight HUD it shares with the arena is
+`src/fighthud.ts`.
+
 ### Headless testing (agents, CI)
 
 Headless Chrome has no GPU in an orb, so by default WebGPU finds no adapter, or

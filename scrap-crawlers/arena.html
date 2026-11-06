@@ -6,28 +6,6 @@
     <title>Scrap Crawlers · Arena</title>
     <link rel="stylesheet" href="./src/ui.css" />
     <style>
-      #plates { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); display: grid;
-        grid-template-columns: 300px 64px 300px; align-items: start; gap: 10px; pointer-events: none; }
-      #plates .window { position: relative; }
-      .plate .wbody { padding: 6px 8px; }
-      .plate .plan { color: var(--dim); margin-bottom: 4px; }
-      #pa { --fill: var(--a); }
-      #pb { --fill: var(--b); text-align: right; }
-      #pb .titlebar { flex-direction: row-reverse; }
-      #pb .bar div { margin-left: auto; }
-      #clock:empty { visibility: hidden; }
-      #clock { position: relative; margin-top: 6px; height: 40px; display: grid; place-items: center;
-        font: bold 20px var(--font); color: var(--yellow); text-shadow: 0 0 6px rgba(246, 196, 69, .5); }
-      #banner { left: 50%; top: 30%; transform: translateX(-50%); display: none; min-width: 300px; }
-      #banner .wbody { text-align: center; padding: 14px 24px 16px; }
-      #banner h1 { margin: 0; font-size: 26px; color: var(--yellow); }
-      #banner .why { color: var(--dim); margin-top: 4px; }
-      #banner.count { background: none; border: none; box-shadow: none; pointer-events: none; }
-      #banner.count h1 { font: bold 64px var(--font); color: var(--yellow); text-shadow: 4px 4px 0 #5a2406, 0 0 0 #000; }
-      #log { left: 10px; bottom: 10px; width: 330px; pointer-events: none; }
-      #log .wbody { padding: 4px; }
-      #log .sunken { padding: 4px 8px; min-height: 60px; color: var(--dim); white-space: pre; }
-      #log b { color: var(--ink); }
       #menu { right: 10px; bottom: 10px; }
       #menu .wbody { display: flex; gap: 8px; padding: 8px; }
     </style>

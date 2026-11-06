@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Scrap Crawlers · Explore</title>
+    <link rel="stylesheet" href="./src/ui.css" />
+    <style>
+      #status { top: 10px; left: 10px; width: 260px; }
+      #status .wbody { padding: 6px 8px; }
+      #status .line { color: var(--dim); margin-top: 4px; }
+      #status .line b { color: var(--yellow); }
+      #status .buttons { display: flex; gap: 8px; margin-top: 8px; }
+      #hint { left: 0; right: 0; bottom: 0; }
+      #fight { display: none; }
+      #fightmenu { right: 10px; bottom: 10px; }
+      #fightmenu .wbody { display: flex; gap: 8px; padding: 8px; }
+      #result { left: 50%; top: 52%; transform: translateX(-50%); display: none; width: 360px; }
+      #result .wbody { text-align: center; padding: 12px 18px 14px; }
+      #result p { margin: 0 0 12px; }
+    </style>
+  </head>
+  <body>
+    <canvas id="gpu"></canvas>
+    <canvas id="overlay"></canvas>
+    <div id="roam">
+      <div id="status" class="window">
+        <div class="titlebar">Your crawler</div>
+        <div class="wbody">
+          <div class="bar sunken"><div></div></div>
+          <div class="line"></div>
+          <div class="buttons"><a id="back" class="button" href="./workshop.html">Workshop</a></div>
+        </div>
+      </div>
+      <div id="hint" class="statusbar"><div class="sunken"></div></div>
+    </div>
+    <div id="fight">
+      <div id="plates">
+        <div id="pa" class="plate window"><div class="titlebar name"></div>
+          <div class="wbody"><div class="plan"></div><div class="bar sunken"><div></div></div></div></div>
+        <div id="clock" class="sunken"></div>
+        <div id="pb" class="plate window"><div class="titlebar name"></div>
+          <div class="wbody"><div class="plan"></div><div class="bar sunken"><div></div></div></div></div>
+      </div>
+      <div id="banner" class="window"></div>
+      <div id="log" class="window"><div class="titlebar">Fight log</div><div class="wbody"><div class="sunken"></div></div></div>
+      <div id="fightmenu" class="window">
+        <div class="titlebar">Wild encounter</div>
+        <div class="wbody"><button id="run">Run</button></div>
+      </div>
+      <div id="result" class="window">
+        <div class="titlebar">After the fight</div>
+        <div class="wbody"><p></p><button id="continue" class="primary">Back to the yard</button></div>
+      </div>
+    </div>
+    <div id="nogpu"><div><h1>WebGPU unavailable</h1><p id="nogpu-msg"></p>
+      <p>Try a recent Chrome, Edge or Safari, or Firefox Nightly with WebGPU enabled.</p></div></div>
+    <script type="module" src="/src/explore.ts"></script>
+  </body>
+</html>

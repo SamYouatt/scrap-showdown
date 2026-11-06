@@ -41,6 +41,7 @@ const vertexBuffers: GPUVertexBufferLayout[] = [
 
 export class Renderer {
   private meshes: { buf: GPUBuffer; count: number }[] = [];
+  private uploads = new WeakMap<Float32Array, { buf: GPUBuffer; count: number }>();
   private instanceBuf: GPUBuffer;
   private globals: GPUBuffer;
   private postUniform: GPUBuffer;
@@ -121,12 +122,22 @@ export class Renderer {
     return new Renderer(device, ctx, format, name, transparent);
   }
 
+  /**
+   * Sets the mesh for each primitive. Uploads are cached per array, so pages that swap
+   * terrains (the explore page going to the pit and back) reuse their buffers.
+   * Old buffers are dropped, not destroy()ed: in headless Chrome on SwiftShader, destroying
+   * a vertex buffer that earlier frames drew from crashes the tab.
+   */
   setMeshes(meshes: Float32Array[]) {
-    for (const m of this.meshes) m.buf.destroy();
     this.meshes = meshes.map((data) => {
-      const buf = this.device.createBuffer({ size: data.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
-      this.device.queue.writeBuffer(buf, 0, data);
-      return { buf, count: data.length / VERTEX_FLOATS };
+      let mesh = this.uploads.get(data);
+      if (!mesh) {
+        const buf = this.device.createBuffer({ size: data.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
+        this.device.queue.writeBuffer(buf, 0, data);
+        mesh = { buf, count: data.length / VERTEX_FLOATS };
+        this.uploads.set(data, mesh);
+      }
+      return mesh;
     });
   }
 
@@ -170,7 +181,7 @@ export class Renderer {
     const { device } = this;
     const { data, ranges } = list.pack();
     if (data.byteLength > this.instanceBuf.size) {
-      this.instanceBuf.destroy();
+      // Drop the old buffer rather than destroy() it: see setMeshes.
       let size = this.instanceBuf.size;
       while (size < data.byteLength) size *= 2;
       this.instanceBuf = device.createBuffer({ size, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });

@@ -217,6 +217,13 @@ export interface Popup {
   hot: boolean;
 }
 
+/** A fighter's name and build; palette defaults to orange for the first, teal for the second. */
+export interface Entrant {
+  name: string;
+  build: Build;
+  palette?: number;
+}
+
 export class Battle {
   readonly fighters: [Fighter, Fighter];
   time = 0;
@@ -225,9 +232,9 @@ export class Battle {
   popups: Popup[] = [];
   private sparks: Spark[] = [];
 
-  constructor(readonly pit: Pit, a: { name: string; build: Build }, b: { name: string; build: Build }) {
-    const make = (f: { name: string; build: Build }, x: number, palette: number) => {
-      const design = { ...designFor(f.build), palette };
+  constructor(readonly pit: Pit, a: Entrant, b: Entrant) {
+    const make = (f: Entrant, x: number, palette: number) => {
+      const design = { ...designFor(f.build), palette: f.palette ?? palette };
       return new Fighter(f.name, f.build, new Creature(design, pit, [x, 0, 0], x < 0 ? Math.PI / 2 : -Math.PI / 2));
     };
     this.fighters = [make(a, -3, 0), make(b, 3, 1)];
