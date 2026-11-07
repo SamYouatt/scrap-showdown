@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Scrap Crawlers · Arena</title>
+    <link rel="stylesheet" href="./src/ui.css" />
+    <style>
+      #menu { right: 10px; bottom: 10px; }
+      #menu .wbody { display: flex; gap: 8px; padding: 8px; }
+    </style>
+  </head>
+  <body>
+    <canvas id="gpu"></canvas>
+    <canvas id="overlay"></canvas>
+    <div id="plates">
+      <div id="pa" class="plate window"><div class="titlebar name"></div>
+        <div class="wbody"><div class="plan"></div><div class="bar sunken"><div></div></div></div></div>
+      <div id="clock" class="sunken"></div>
+      <div id="pb" class="plate window"><div class="titlebar name"></div>
+        <div class="wbody"><div class="plan"></div><div class="bar sunken"><div></div></div></div></div>
+    </div>
+    <div id="banner" class="window"></div>
+    <div id="log" class="window"><div class="titlebar">Fight log</div><div class="wbody"><div class="sunken"></div></div></div>
+    <div id="menu" class="window">
+      <div class="titlebar">The pit</div>
+      <div class="wbody">
+        <button id="rematch" class="primary">Rematch</button>
+        <button id="next">Next rival</button>
+        <a id="back" class="button" href="./workshop.html">Workshop</a>
+      </div>
+    </div>
+    <div id="nogpu"><div><h1>WebGPU unavailable</h1><p id="nogpu-msg"></p>
+      <p>Try a recent Chrome, Edge or Safari, or Firefox Nightly with WebGPU enabled.</p></div></div>
+    <script type="module" src="/src/arena.ts"></script>
+  </body>
+</html>

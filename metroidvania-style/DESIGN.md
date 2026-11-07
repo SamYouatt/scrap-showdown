@@ -1,0 +1,61 @@
+## Procedural version
+
+- 3d to pixel art render pipeline
+	- gives good texture but means all models can still be 3d and fully animated
+- procedural IK movement
+	- makes the robots feel more like creatures
+	- hoping it makes it easy to add funky parts and just let the system bring the interactions and behaviours out
+- let the systems drive the customisation
+	- pick main parts of the body and then add attachments and such
+		- main central hull
+			- this is where we can encourage different shapes of creature
+			- standard single block body
+			- multi hinged snake like shapes
+			- hulls have mount points that control legs and weaponry
+		- control module
+			- this control module becomes the head/face of the creation
+				- something that has better "vision" will have more eyes like a fly
+				- gives each creation a character
+				- have the eyes follow things in the environment or the cursor or something
+			- you'll start with only one of these and find more later
+				- this lets you increase the size of your roster over time for specialisations
+		- legs might come as styles/kits rather than full customisation
+			- i.e. you get a quadruped kit, or a millipede kit
+			- some legs would come with armour of thicker design which changes their gameplay, slower but better protection
+			- could have some that are wheels, like caterpillar tracks or like walles things
+		- could have arms available as well
+			- these might fall under the tool category or might be their own thing that opens up more combinations
+		- weaponry and tools
+			- don't want full control of positioning so need a system that still lets emergent combos come up without full control
+				- this might be based on the shape of hull?
+				- could be based on mount points?
+					- legs might be possible mount points for certain types
+					- arms would be powerful because they could be mount points for a variety of things
+					- certain weapons might require multiple mount points - saw blade you'd want on the front, but that one requires its own battery pack which will take up another mount point
+- gradually get more parts
+	- scrap heap still?
+		- you have to take your robot into the scrap heap to get the parts
+			- this means it can get damaged here as well
+			- when you get a second head you could choose to have a robot more optimised for scrap heaping
+				- could it have to drag a little wagon around or something?
+		-  could it be more exploration and less rogue like?
+			- as you progress out there would be different zones
+				- zones would have certain characteristics like a really rocky one that would be awful for wheels so you'd want a really long legged stable one, another is a hot area that wants some heat plating on your hull
+- combat
+	- auto battler?
+		- if its procedural maybe this is easier because we can control the core behaviours of certain things and have the robot react
+			- dependent on weapon you'd train it to rush in or stay away or try and flank
+	- controlled?
+		- more interactive but maybe too simplistic
+		- imbalance against the AI because you're always going to be more skilled
+	- variations of arenas
+		- terrain changes
+		- temperature changes
+		- hazards like geysers, cliff edges, water, electricity
+	- variation of modes
+		- some fights will be 1v1, other 1v1v1, some maybe even team based
+			- unlock pair battles when you get more controllers
+				- have pairings that complement each other well
+					- one build that is good for immobilising while another is good for damage but that damage is hard to land so they synergise well
+					- a tank and a healer style build
+

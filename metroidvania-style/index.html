@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Scrap Crawlers</title>
+    <link rel="stylesheet" href="./src/ui.css" />
+    <style>
+      #panel { top: 10px; right: 10px; bottom: 66px; width: 284px; }
+      label { display: grid; grid-template-columns: 90px 1fr 40px; align-items: center; gap: 6px; margin: 4px 0; }
+      label.check { grid-template-columns: 90px 1fr; }
+      label span.v { text-align: right; color: var(--yellow); font-weight: bold; overflow: hidden; }
+      input[type=range] { width: 100%; }
+      .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+      #hud { left: 0; right: 0; bottom: 0; }
+    </style>
+  </head>
+  <body>
+    <canvas id="gpu"></canvas>
+    <canvas id="overlay"></canvas>
+    <div id="panel" class="window">
+      <div class="titlebar">Scrap Crawlers: walker bench</div>
+      <div class="wbody">
+        <div class="sub">Procedural walker bench. <a href="./workshop.html">Workshop</a></div>
+        <div id="controls"></div>
+      </div>
+    </div>
+    <div id="hud" class="statusbar"><div class="sunken"></div></div>
+    <div id="nogpu"><div><h1>WebGPU unavailable</h1><p id="nogpu-msg"></p>
+      <p>Try a recent Chrome, Edge or Safari, or Firefox Nightly with WebGPU enabled.</p></div></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

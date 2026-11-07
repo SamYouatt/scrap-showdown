@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Scrap Crawlers · Workshop</title>
+    <link rel="stylesheet" href="./src/ui.css" />
+    <style>
+      /* The 3D view starts right of the parts bin so the build sits centred in the open space. */
+      canvas { left: 318px; width: calc(100% - 318px); }
+      #bin { top: 10px; left: 10px; bottom: 10px; width: 298px; }
+      #sheetwin { top: 10px; right: 10px; width: 268px; max-height: calc(100% - 20px); }
+      .card { position: relative; display: grid; grid-template-columns: 72px 1fr; gap: 8px; align-items: center;
+        margin: 0 0 6px; padding: 4px 8px 4px 4px; cursor: grab; background: var(--face-hi); border: 2px solid;
+        border-color: var(--bevel-hi) var(--bevel-lo) var(--bevel-lo) var(--bevel-hi); }
+      .card:hover { box-shadow: inset 0 0 0 2px var(--orange); }
+      .card .name { font-weight: bold; margin-bottom: 4px; padding-right: 54px; }
+      .card .thumb { display: block; image-rendering: pixelated; }
+      .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+      .chips span { font-size: 11px; padding: 0 5px; color: var(--dim); background: var(--well); border: 1px solid;
+        border-color: var(--bevel-lo) var(--bevel-hi) var(--bevel-hi) var(--bevel-lo); }
+      .chips span.slot { color: var(--yellow); }
+      .chips span.needs { color: var(--bad); }
+      .card.fitted::after { content: 'FITTED'; position: absolute; top: 5px; right: 6px; padding: 0 5px; font-size: 10px; font-weight: bold;
+        color: #2a1606; background: var(--yellow); border: 1px solid #8a560e; }
+      .card.body { cursor: pointer; }
+      .card.body.chosen { box-shadow: inset 0 0 0 2px var(--yellow); }
+      .card.locked { opacity: .45; cursor: not-allowed; }
+      .card.locked:hover { box-shadow: none; }
+      .card.soon::after { content: 'NOT YET'; position: absolute; top: 5px; right: 6px; padding: 0 5px; font-size: 10px; color: var(--dim);
+        background: var(--well); border: 1px solid var(--bevel-lo); }
+      .nested { margin-left: 18px; }
+      .nested::before { content: ''; position: absolute; left: -14px; top: -8px; width: 10px; height: 26px;
+        border-left: 2px solid var(--bevel-hi); border-bottom: 2px solid var(--bevel-hi); }
+      .card.wanted { animation: want 0.9s steps(2) infinite; }
+      @keyframes want { 50% { box-shadow: inset 0 0 0 2px var(--yellow); } }
+      .list { margin: 2px 0 8px; }
+      .row { display: grid; grid-template-columns: 74px 1fr 22px; gap: 6px; align-items: center; min-height: 28px; padding: 2px 6px;
+        border-bottom: 1px solid #2a221e; }
+      .row:last-child { border-bottom: none; }
+      .row .slot { color: var(--dim); }
+      .row .empty { color: var(--mute); font-style: italic; }
+      .row button { min-height: 20px; height: 20px; width: 22px; padding: 0; font-size: 13px; }
+      .warn { color: var(--bad); font-size: 11.5px; margin: 4px 0 0; }
+      .ok { color: var(--good); font-size: 11.5px; margin: 4px 0 0; font-weight: bold; }
+      .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+      #ghost { position: fixed; pointer-events: none; display: none; z-index: 10; transform: translate(14px, 10px); }
+      #ghost.snapped { background: #ffe58a; }
+      #prompt { position: absolute; left: calc(50% + 159px); top: 22%; transform: translateX(-50%); pointer-events: none; padding: 7px 12px; }
+      #hud { left: 318px; right: 0; bottom: 0; }
+    </style>
+  </head>
+  <body>
+    <canvas id="gpu"></canvas>
+    <canvas id="overlay"></canvas>
+    <div id="bin" class="window">
+      <div class="titlebar">Parts bin</div>
+      <div class="wbody">
+        <div class="sub">Drag parts onto the mounts. <a href="./">Walker bench</a></div>
+        <div id="parts"></div>
+      </div>
+    </div>
+    <div id="sheetwin" class="window">
+      <div class="titlebar">Build sheet</div>
+      <div id="sheet" class="wbody"></div>
+    </div>
+    <div id="prompt" class="tooltip"></div>
+    <div id="ghost" class="tooltip"></div>
+    <div id="hud" class="statusbar"><div class="sunken"></div></div>
+    <div id="nogpu"><div><h1>WebGPU unavailable</h1><p id="nogpu-msg"></p>
+      <p>Try a recent Chrome, Edge or Safari, or Firefox Nightly with WebGPU enabled.</p></div></div>
+    <script type="module" src="/src/workshop.ts"></script>
+  </body>
+</html>
